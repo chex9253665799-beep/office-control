@@ -17,7 +17,7 @@ on:
         description: "Что сделать"
         type: choice
         default: status
-        options: [install, status, logs, restart, pcs, reset2fa, rddiag]
+        options: [install, status, logs, restart, pcs, reset2fa, rddiag, lastdiag]
       target:
         description: "Имя ПК (для rddiag)"
         type: string
@@ -111,6 +111,9 @@ jobs:
               $SSH "$USR@$HOST" "cat > /tmp/rd_x.ps1" < "${SCRIPT:-server/tools/rd_diag_default.ps1}" 2>/dev/null || true
               if [ -n "$SCRIPT" ]; then $SSH "$USR@$HOST" "$SUDO python3 - '$TARGET' /tmp/rd_x.ps1; rm -f /tmp/rd_x.ps1" < server/tools/rd_diag.py
               else $SSH "$USR@$HOST" "$SUDO python3 - '$TARGET'" < server/tools/rd_diag.py; fi
+              ;;
+            lastdiag)
+              $SSH "$USR@$HOST" "$SUDO python3 -" < server/tools/task_out.py
               ;;
             reset2fa)
               # потерян телефон: сбросить код из приложения, при следующем входе панель предложит настроить заново
