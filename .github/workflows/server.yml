@@ -59,12 +59,15 @@ jobs:
               [ -n "$PANEL_PASS" ] || { echo "Нет секрета PANEL_PASS (пароль панели)"; exit 1; }
               # пароль панели передаём через stdin, чтобы его не было в командной строке на сервере
               printf '%s\n' "$PANEL_PASS" | $SSH "$USR@$HOST" \
-                "read -r P; curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/server/install.sh -o /tmp/office-install.sh && OFFICE_PASS=\"\$P\" OFFICE_HOST='$HOST' $SUDO -E bash /tmp/office-install.sh; rc=\$?; rm -f /tmp/office-install.sh; exit \$rc"
+                "read -r P; curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/server/install.sh -o /tmp/office-install.sh && $SUDO env OFFICE_PASS=\"\$P\" OFFICE_HOST='$HOST' bash /tmp/office-install.sh; rc=\$?; rm -f /tmp/office-install.sh; exit \$rc"
               ;;
             status)
               $SSH "$USR@$HOST" "uname -a; . /etc/os-release && echo \"\$PRETTY_NAME\"; uptime; free -m; df -h / | tail -1;
                 for s in office-hbbs office-hbbr office-panel; do printf '%-14s ' \$s; systemctl is-active \$s 2>/dev/null || true; done;
                 echo '--- порты'; ss -lntu 2>/dev/null | grep -E ':(2111[5-9]|8443)\b' || echo 'порты панели не слушаются';
+                echo '--- работающие службы'; systemctl list-units --type=service --state=running --no-legend --plain | awk '{print \$1}' | tr '\n' ' '; echo;
+                echo '--- pm2'; (command -v pm2 >/dev/null && pm2 jlist 2>/dev/null | python3 -c 'import sys,json; [print(p[\"name\"], p[\"pm2_env\"][\"status\"]) for p in json.load(sys.stdin)]') || echo 'pm2 нет';
+                echo '--- все открытые порты'; ss -lntup 2>/dev/null | awk 'NR>1{print \$1, \$5, \$7}' | sort -u;
                 echo '--- брандмауэр'; (command -v ufw >/dev/null && ufw status) || echo 'ufw нет';
                 echo '--- проверка панели'; curl -sk -o /dev/null -w 'HTTP %{http_code}\n' https://127.0.0.1:8443/ || true"
               ;;

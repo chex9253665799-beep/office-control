@@ -18,10 +18,13 @@ die() { printf '\033[1;31m%s\033[0m\n' "$*"; exit 1; }
 [ "$(id -u)" = 0 ] || die "Запусти от root (sudo -i)."
 
 say "1/7  Пакеты"
-if command -v apt-get >/dev/null; then
+# ставим только то, чего нет, — уже установленное не обновляем (чтобы не задеть другие программы на сервере)
+NEED=""
+for p in python3 openssl unzip curl; do command -v "$p" >/dev/null || NEED="$NEED $p"; done
+if [ -n "$NEED" ] && command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq >/dev/null
-  apt-get install -y -qq python3 openssl unzip curl ca-certificates >/dev/null
+  apt-get install -y -qq --no-upgrade $NEED ca-certificates >/dev/null
 fi
 python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,7) else 1)' || die "Нужен Python 3.7 или новее."
 
