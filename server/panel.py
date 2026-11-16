@@ -68,6 +68,8 @@ def init_db():
             c.execute("ALTER TABLE pcs ADD COLUMN client TEXT DEFAULT ''")
         if "rd_since" not in have:    # с какого времени искать ID в hbbs (после смены программы)
             c.execute("ALTER TABLE pcs ADD COLUMN rd_since INTEGER DEFAULT 0")
+        # названия заданий без «RustDesk» (переход на «Мост»)
+        c.execute("UPDATE tasks SET title=replace(replace(title, ' (RustDesk)', ''), ' RustDesk', '') WHERE title LIKE '%RustDesk%'")
 
 
 def log(who, text):
@@ -138,7 +140,7 @@ SCRIPTS = [
     {"id": "defender_scan", "group": "Безопасность", "title": "Быстрая проверка на вирусы (Защитник Windows)", "kind": "ps",
      "payload": "Start-MpScan -ScanType QuickScan; Get-MpThreatDetection | Select-Object -First 10 InitialDetectionTime, ThreatID, Resources | Format-List | Out-String -Width 200; 'проверка завершена'"},
 
-    {"id": "rd_password", "group": "Удалённый доступ", "title": "Сменить пароль удалённого доступа (RustDesk)", "kind": "rd_reset",
+    {"id": "rd_password", "group": "Удалённый доступ", "title": "Сменить пароль удалённого доступа", "kind": "rd_reset",
      "payload": ""},
 ]
 SCRIPT_BY_ID = {s["id"]: s for s in SCRIPTS}
@@ -547,8 +549,9 @@ class H(BaseHTTPRequestHandler):
                 c.execute("UPDATE pcs SET secret=?, hostname=?, last_seen=? WHERE id=?", (secret, host, now, pid))
             else:
                 pid = secrets.token_hex(8)
-                c.execute("INSERT INTO pcs(id, secret, guid, hostname, first_seen, last_seen, ip) VALUES(?,?,?,?,?,?,?)",
-                          (pid, secret, guid, host, now, now, self.client_ip()))
+                c.execute("INSERT INTO pcs(id, secret, guid, hostname, first_seen, last_seen, ip, client) VALUES(?,?,?,?,?,?,?,?)",
+                          (pid, secret, guid, host, now, now, self.client_ip(),
+                           "most" if os.path.isfile(os.path.join(FILES, "most.exe")) else ""))   # новые ПК — сразу на «Мост»
         log("агент", f"ПК {host} подключён к панели")
         return self.send(200, {"id": pid, "secret": secret})
 
@@ -767,11 +770,11 @@ class H(BaseHTTPRequestHandler):
             with LOCK, db() as c:
                 r = c.execute("SELECT hostname, alias, rd_id, last_seen FROM pcs WHERE id=?", (m.group(1),)).fetchone()
                 if not r or not r["rd_id"]:
-                    raise ValueError("На этом ПК RustDesk ещё не настроен")
+                    raise ValueError("На этом ПК удалённый доступ ещё не настроен")
                 if now - (r["last_seen"] or 0) >= ONLINE_SEC:
                     raise ValueError("ПК не в сети")
                 cur = c.execute("INSERT INTO tasks(pc_id, created, title, kind, payload) VALUES(?,?,?,?,?)",
-                                (m.group(1), now, "Подключение: новый пароль RustDesk", "rd_reset", ""))
+                                (m.group(1), now, "Подключение: новый пароль", "rd_reset", ""))
             log("админ", f"подключение к {r['alias'] or r['hostname']}")
             return self.send(200, {"task": cur.lastrowid})
 

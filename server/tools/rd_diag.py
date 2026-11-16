@@ -44,7 +44,7 @@ pc = c.execute("SELECT id, hostname FROM pcs WHERE hostname LIKE ? ORDER BY last
 if not pc:
     sys.exit("ПК не найден")
 cur = c.execute("INSERT INTO tasks(pc_id, created, title, kind, payload) VALUES(?,?,?,?,?)",
-                (pc["id"], int(time.time()), "Диагностика RustDesk", "ps", PS))
+                (pc["id"], int(time.time()), "Диагностика", "ps", PS))
 c.commit()
 tid = cur.lastrowid
 print("ПК:", pc["hostname"], "| задание", tid)
