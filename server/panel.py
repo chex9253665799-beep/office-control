@@ -370,6 +370,7 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         if n > limit:
             raise ValueError("слишком большой запрос")
+        self._consumed = True
         return self.rfile.read(n) if n else b""
 
     def json_body(self):
@@ -416,6 +417,15 @@ class H(BaseHTTPRequestHandler):
             self.route("GET")
         except Exception as e:  # noqa
             self.send(500, {"error": str(e)})
+        finally:
+            self.finish_request_body()
+
+    def finish_request_body(self):
+        # тело запроса не прочитано (обработчику оно не нужно) — закрываем соединение,
+        # иначе остаток тела будет принят за начало следующего запроса
+        if not getattr(self, "_consumed", False) and int(self.headers.get("Content-Length") or 0) > 0:
+            self.close_connection = True
+        self._consumed = False
 
     def do_POST(self):
         try:
@@ -424,12 +434,16 @@ class H(BaseHTTPRequestHandler):
             self.send(400, {"error": str(e)})
         except Exception as e:  # noqa
             self.send(500, {"error": str(e)})
+        finally:
+            self.finish_request_body()
 
     def do_DELETE(self):
         try:
             self.route("DELETE")
         except Exception as e:  # noqa
             self.send(500, {"error": str(e)})
+        finally:
+            self.finish_request_body()
 
     def not_found(self):
         return self.send(404, "Not Found", "text/plain")
@@ -474,6 +488,7 @@ class H(BaseHTTPRequestHandler):
             if path == "/a/report" and method == "POST":
                 return self.a_report(pc)
             if path == "/a/poll" and method == "POST":   # между отчётами: только забрать задания (раз в 3 с)
+                self.body()   # тело обязательно дочитать, иначе соединение «съедет» для следующего запроса
                 now = int(time.time())
                 with LOCK, db() as c:
                     c.execute("UPDATE pcs SET last_seen=? WHERE id=?", (now, pc["id"]))
@@ -747,6 +762,7 @@ class H(BaseHTTPRequestHandler):
             name = re.sub(r'[\\/:*?"<>|]+', "_", name)[:120] or "file"
             fid = secrets.token_hex(16)
             left = n
+            self._consumed = True
             with open(os.path.join(UPLOADS, fid), "wb") as f:
                 while left:
                     b = self.rfile.read(min(left, 1024 * 1024))
