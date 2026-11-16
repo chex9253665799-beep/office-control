@@ -82,6 +82,8 @@ jobs:
           for r in c.execute('SELECT * FROM pcs'):
               i = json.loads(r['info'] or '{}')
               print(r['hostname'], '| был', now - (r['last_seen'] or 0), 'с назад | info полей:', len(i), '| программ:', len(json.loads(r['programs'] or '[]')), '| rd_id:', 'есть' if r['rd_id'] else 'нет', '| пароль rd:', 'есть' if r['rd_pass'] else 'нет', '| агент', i.get('agent'))
+              import re
+              for l in (i.get('log') or [])[-12:]: print('    ', re.sub(r'\\d{6,}', '#####', str(l)))
           \"; ls -la /opt/office"
               ;;
             restart)
