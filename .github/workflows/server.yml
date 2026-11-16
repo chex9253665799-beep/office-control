@@ -17,7 +17,7 @@ on:
         description: "Что сделать"
         type: choice
         default: status
-        options: [install, status, logs, restart, pcs, reset2fa, rddiag, lastdiag]
+        options: [install, status, logs, restart, pcs, reset2fa, rddiag, lastdiag, load]
       target:
         description: "Имя ПК (для rddiag)"
         type: string
@@ -111,6 +111,16 @@ jobs:
               $SSH "$USR@$HOST" "cat > /tmp/rd_x.ps1" < "${SCRIPT:-server/tools/rd_diag_default.ps1}" 2>/dev/null || true
               if [ -n "$SCRIPT" ]; then $SSH "$USR@$HOST" "$SUDO python3 - '$TARGET' /tmp/rd_x.ps1; rm -f /tmp/rd_x.ps1" < server/tools/rd_diag.py
               else $SSH "$USR@$HOST" "$SUDO python3 - '$TARGET'" < server/tools/rd_diag.py; fi
+              ;;
+            load)
+              # нагрузка сервера: процессор, память, сеть за 10 секунд, соединения RustDesk
+              $SSH "$USR@$HOST" "uptime; free -m | head -2; nproc;
+                echo '--- процессы (CPU%, MEM%)'; ps -eo pid,pcpu,pmem,rss,etime,comm --sort=-pcpu | head -12;
+                echo '--- службы офиса'; ps -o pid,pcpu,pmem,rss,comm -C hbbs,hbbr,python3 2>/dev/null;
+                echo '--- сеть за 10 с'; IF=\$(ip route show default | awk '{print \$5; exit}'); a=\$(awk -v i=\$IF: '\$1==i{print \$2, \$10}' /proc/net/dev); sleep 10; b=\$(awk -v i=\$IF: '\$1==i{print \$2, \$10}' /proc/net/dev);
+                set -- \$a \$b; echo \"входящий: \$(( (\$3-\$1)*8/10/1000 )) Кбит/с, исходящий: \$(( (\$4-\$2)*8/10/1000 )) Кбит/с (\$IF)\";
+                echo '--- соединения через ретранслятор RustDesk (21117)'; ss -tn state established '( sport = :21117 )' | tail -n +2 | wc -l;
+                echo '--- соединения к серверу ID (21116)'; ss -tn state established '( sport = :21116 )' | tail -n +2 | wc -l"
               ;;
             lastdiag)
               $SSH "$USR@$HOST" "$SUDO python3 -" < server/tools/task_out.py
