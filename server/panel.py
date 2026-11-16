@@ -5,6 +5,7 @@
 Запуск: python3 panel.py /opt/office/config.json
 """
 import base64
+import struct
 import hashlib
 import hmac
 import http.cookies
@@ -33,7 +34,9 @@ DB_PATH = os.path.join(HOME, "office.db")
 ONLINE_SEC = 90          # ПК «в сети», если отчитывался за последние 90 секунд
 MAX_UPLOAD = 2 * 1024 ** 3
 LOCK = threading.Lock()
-SESSIONS = {}            # токен -> срок
+SESSIONS = {}            # токен -> {"exp": срок, "full": вход завершён (с кодом из приложения)}
+PENDING_TOTP = {}        # токен -> секрет, пока настраивается код
+LAST_TOTP = [0]          # последний принятый шаг кода — один код дважды не принимается
 FAILS = {}               # ip -> (кол-во, время) — защита от перебора пароля
 
 
@@ -171,8 +174,175 @@ def agent_version():
 AGENT_VERSION = agent_version()
 
 
+# ------------------------------------------------------------------ QR-код (без библиотек)
+# байтовый режим, коррекция L, версии 1–5 (до 106 байт) — хватает для ссылки otpauth://
+
+_QR_CAP = [(0, 0), (26, 7), (44, 10), (70, 15), (100, 20), (134, 26)]
+
+
+def _gf_mul(x, y):
+    z = 0
+    for i in range(7, -1, -1):
+        z = (z << 1) ^ ((z >> 7) * 0x11D)
+        z ^= ((y >> i) & 1) * x
+    return z & 0xFF
+
+
+def _rs(words, degree):
+    gen = [0] * degree
+    gen[-1] = 1
+    root = 1
+    for _ in range(degree):
+        for j in range(degree):
+            gen[j] = _gf_mul(gen[j], root)
+            if j + 1 < degree:
+                gen[j] ^= gen[j + 1]
+        root = _gf_mul(root, 2)
+    res = [0] * degree
+    for w in words:
+        f = w ^ res[0]
+        res = res[1:] + [0]
+        for j in range(degree):
+            res[j] ^= _gf_mul(gen[j], f)
+    return res
+
+
+def qr_matrix(text):
+    data = text.encode("utf-8")
+    ver = 1
+    while ver <= 5 and (_QR_CAP[ver][0] - _QR_CAP[ver][1]) * 8 < 12 + len(data) * 8:
+        ver += 1
+    if ver > 5:
+        raise ValueError("слишком длинный текст для QR")
+    total, ecn = _QR_CAP[ver]
+    dw = total - ecn
+    bits = []
+
+    def put(v, n):
+        bits.extend((v >> i) & 1 for i in range(n - 1, -1, -1))
+    put(4, 4)
+    put(len(data), 8)
+    for b in data:
+        put(b, 8)
+    put(0, min(4, dw * 8 - len(bits)))
+    while len(bits) % 8:
+        bits.append(0)
+    pad = 0xEC
+    while len(bits) < dw * 8:
+        put(pad, 8)
+        pad ^= 0xEC ^ 0x11
+    words = [int("".join(map(str, bits[i:i + 8])), 2) for i in range(0, dw * 8, 8)]
+    words += _rs(words, ecn)
+
+    size = ver * 4 + 17
+    m = [[False] * size for _ in range(size)]
+    fn = [[False] * size for _ in range(size)]
+
+    def st(x, y, v):
+        m[y][x] = v
+        fn[y][x] = True
+
+    for x0, y0 in ((0, 0), (size - 7, 0), (0, size - 7)):
+        for dy in range(-1, 8):
+            for dx in range(-1, 8):
+                x, y = x0 + dx, y0 + dy
+                if 0 <= x < size and 0 <= y < size:
+                    d = max(abs(dx - 3), abs(dy - 3))
+                    st(x, y, d not in (2, 4))
+    for i in range(8, size - 8):
+        st(6, i, i % 2 == 0)
+        st(i, 6, i % 2 == 0)
+    if ver >= 2:
+        c = size - 7
+        for dy in range(-2, 3):
+            for dx in range(-2, 3):
+                st(c + dx, c + dy, max(abs(dx), abs(dy)) != 1)
+    for i in range(9):
+        fn[8][i] = fn[i][8] = True
+    for i in range(8):
+        fn[8][size - 1 - i] = fn[size - 1 - i][8] = True
+    st(8, size - 8, True)
+
+    bit, nbits = 0, len(words) * 8
+    right = size - 1
+    while right >= 1:
+        if right == 6:
+            right = 5
+        for vert in range(size):
+            for j in range(2):
+                x = right - j
+                up = ((right + 1) & 2) == 0
+                y = size - 1 - vert if up else vert
+                if fn[y][x]:
+                    continue
+                v = bit < nbits and ((words[bit >> 3] >> (7 - (bit & 7))) & 1) == 1
+                bit += 1
+                m[y][x] = v ^ ((x + y) % 2 == 0)
+        right -= 2
+
+    rem = 0b01000
+    for _ in range(10):
+        rem = (rem << 1) ^ ((rem >> 9) * 0x537)
+    fb = ((0b01000 << 10) | rem) ^ 0x5412
+
+    def b(i):
+        return ((fb >> i) & 1) == 1
+    for i in range(6):
+        m[i][8] = b(i)
+    m[7][8], m[8][8], m[8][7] = b(6), b(7), b(8)
+    for i in range(9, 15):
+        m[8][14 - i] = b(i)
+    for i in range(8):
+        m[8][size - 1 - i] = b(i)
+    for i in range(8, 15):
+        m[size - 15 + i][8] = b(i)
+    m[size - 8][8] = True
+    return m
+
+
+def qr_svg(text, px=220):
+    m = qr_matrix(text)
+    n = len(m) + 8
+    rects = "".join(f'<rect x="{x + 4}" y="{y + 4}" width="1" height="1"/>' for y, row in enumerate(m) for x, v in enumerate(row) if v)
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {n} {n}" width="{px}" height="{px}" shape-rendering="crispEdges">'
+            f'<rect width="{n}" height="{n}" fill="#fff"/><g fill="#000">{rects}</g></svg>')
+
+
+# ------------------------------------------------------------------ код из приложения (TOTP, RFC 6238)
+
+def totp_code(secret_b32, counter):
+    key = base64.b32decode(secret_b32.upper() + "=" * (-len(secret_b32) % 8))
+    h = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    o = h[-1] & 15
+    return "%06d" % ((struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % 1000000)
+
+
+def totp_check(secret_b32, code, replay=True):
+    code = re.sub(r"\D", "", str(code or ""))
+    if len(code) != 6 or not secret_b32:
+        return False
+    now = int(time.time()) // 30
+    for c in (now - 1, now, now + 1):
+        if hmac.compare_digest(totp_code(secret_b32, c), code):
+            if replay:
+                if c <= LAST_TOTP[0]:
+                    return False
+                LAST_TOTP[0] = c
+            return True
+    return False
+
+
+def save_cfg():
+    tmp = CFG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(CFG, f, indent=2, ensure_ascii=False)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, CFG_PATH)
+
+
 class H(BaseHTTPRequestHandler):
-    server_version = "office/" + VERSION
+    server_version = "nginx"
+    sys_version = ""
     protocol_version = "HTTP/1.1"
     timeout = 120   # «висящее» соединение не держит поток вечно
 
@@ -213,11 +383,15 @@ class H(BaseHTTPRequestHandler):
     def admin(self):
         ck = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
         t = ck.get("oc") and ck["oc"].value
-        exp = SESSIONS.get(t or "")
-        if exp and exp > time.time():
-            SESSIONS[t] = time.time() + 12 * 3600
-            return True
-        return False
+        s = SESSIONS.get(t or "")
+        if s and s["exp"] > time.time():
+            s["exp"] = time.time() + 12 * 3600
+            return s
+        return None
+
+    def session_token(self):
+        ck = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
+        return ck["oc"].value if ck.get("oc") else ""
 
     # --- доступ агента
     def agent(self):
@@ -254,14 +428,26 @@ class H(BaseHTTPRequestHandler):
         except Exception as e:  # noqa
             self.send(500, {"error": str(e)})
 
+    def not_found(self):
+        return self.send(404, "Not Found", "text/plain")
+
     def route(self, method):
         u = urllib.parse.urlparse(self.path)
         path, q = u.path, urllib.parse.parse_qs(u.query)
 
+        # секретный адрес админки: https://сервер:порт/<admin_path>/ — без него админки «нет»
+        ap = "/" + CFG["admin_path"] if CFG.get("admin_path") else ""
+        in_admin = not ap
+        if ap:
+            if path == ap:
+                return self.send(302, b"", headers={"Location": ap + "/"})
+            if path.startswith(ap + "/"):
+                path, in_admin = path[len(ap):], True
+
         # ---------- установка агента (по токену подключения)
         if path in ("/install.ps1", "/agent.ps1"):
             if not hmac.compare_digest((q.get("t") or [""])[0], CFG["enroll_token"]):
-                return self.send(403, "Неверная ссылка установки", "text/plain; charset=utf-8")
+                return self.not_found()
             name = "install.ps1" if path == "/install.ps1" else "agent.ps1"
             txt = open(os.path.join(AGENT_DIR, name), encoding="utf-8").read()
             txt = (txt.replace("__PANEL__", CFG["public_url"]).replace("__THUMB__", CFG["thumb"])
@@ -270,8 +456,9 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, txt, "text/plain; charset=utf-8")
 
         if path == "/dl/rustdesk.exe":
-            if not (self.agent() or hmac.compare_digest((q.get("t") or [""])[0], CFG["enroll_token"]) or self.admin()):
-                return self.send(403, {"error": "нет доступа"})
+            sess = in_admin and self.admin()
+            if not (self.agent() or hmac.compare_digest((q.get("t") or [""])[0], CFG["enroll_token"]) or (sess and sess["full"])):
+                return self.not_found()
             return self.send_file(os.path.join(FILES, "rustdesk.exe"), "rustdesk.exe")
 
         # ---------- агент
@@ -290,6 +477,9 @@ class H(BaseHTTPRequestHandler):
                 return self.send_file(os.path.join(UPLOADS, m.group(1)), None)
             return self.send(404, {"error": "нет такого"})
 
+        if not in_admin:
+            return self.not_found()
+
         # ---------- вход
         if path == "/api/login" and method == "POST":
             return self.login()
@@ -299,10 +489,13 @@ class H(BaseHTTPRequestHandler):
 
         # ---------- панель (только администратор)
         if path.startswith("/api/"):
-            if not self.admin():
+            sess = self.admin()
+            if not sess:
                 return self.send(401, {"error": "нужно войти"})
+            if not sess["full"]:   # вошёл по паролю, но код из приложения ещё не настроен
+                return self.api_2fa_setup(method, path, sess)
             return self.api(method, path, q)
-        return self.send(404, "Не найдено", "text/plain; charset=utf-8")
+        return self.not_found()
 
     # ------------------------------------------------------------------ агент
 
@@ -384,15 +577,53 @@ class H(BaseHTTPRequestHandler):
         if n >= 5 and time.time() - t < 600:
             return self.send(429, {"error": "Слишком много попыток. Подожди 10 минут."})
         d = self.json_body()
-        if not check_pw(str(d.get("password", "")), CFG["admin_hash"]):
+        has2fa = bool(CFG.get("totp"))
+        ok = check_pw(str(d.get("password", "")), CFG["admin_hash"])
+        if ok and has2fa:
+            ok = totp_check(CFG["totp"], d.get("code"))
+        if not ok:
             FAILS[ip] = (n + 1, time.time())
             log(ip, "неудачный вход в панель")
-            return self.send(403, {"error": "Неверный пароль"})
+            time.sleep(1)
+            return self.send(403, {"error": "Неверный пароль или код" if has2fa else "Неверный пароль"})
         FAILS.pop(ip, None)
         tok = secrets.token_urlsafe(32)
-        SESSIONS[tok] = time.time() + 12 * 3600
-        log(ip, "вход в панель")
-        return self.send(200, {"ok": True}, headers={"Set-Cookie": f"oc={tok}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200"})
+        SESSIONS[tok] = {"exp": time.time() + 12 * 3600, "full": has2fa}
+        log(ip, "вход в панель" if has2fa else "вход по паролю — настройка кода из приложения")
+        path = ("/" + CFG["admin_path"] + "/") if CFG.get("admin_path") else "/"
+        return self.send(200, {"ok": True, "setup2fa": not has2fa},
+                         headers={"Set-Cookie": f"oc={tok}; Path={path}; HttpOnly; Secure; SameSite=Strict; Max-Age=43200"})
+
+    def api_2fa_setup(self, method, path, sess):
+        """Первый вход: обязательная настройка кода из приложения (Яндекс Ключ / Google Authenticator)."""
+        tok = self.session_token()
+        if path == "/api/info":
+            return self.send(200, {"setup2fa": True})
+        if path == "/api/logout":
+            SESSIONS.pop(tok, None)
+            PENDING_TOTP.pop(tok, None)
+            return self.send(200, {"ok": True})
+        if path == "/api/2fa/new" and method == "POST":
+            sec = base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+            PENDING_TOTP[tok] = sec
+            host = urllib.parse.quote(CFG.get("rd_host", "office"))
+            uri = f"otpauth://totp/Office:{host}?secret={sec}&issuer=Office"
+            return self.send(200, {"secret": sec, "svg": qr_svg(uri)})
+        if path == "/api/2fa/confirm" and method == "POST":
+            sec = PENDING_TOTP.get(tok)
+            if not sec:
+                raise ValueError("Сначала получи QR-код")
+            if CFG.get("totp"):
+                raise ValueError("Код уже настроен — войди заново")
+            if not totp_check(sec, self.json_body().get("code")):
+                raise ValueError("Код не подошёл — проверь время на телефоне и попробуй следующий")
+            CFG["totp"] = sec
+            save_cfg()
+            PENDING_TOTP.pop(tok, None)
+            sess["full"] = True
+            log(self.client_ip(), "код из приложения настроен")
+            return self.send(200, {"ok": True})
+        return self.send(403, {"error": "Сначала настрой код из приложения"})
 
     # ------------------------------------------------------------------ API панели
 
@@ -402,7 +633,8 @@ class H(BaseHTTPRequestHandler):
             ck = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
             if ck.get("oc"):
                 SESSIONS.pop(ck["oc"].value, None)
-            return self.send(200, {"ok": True}, headers={"Set-Cookie": "oc=; Path=/; Max-Age=0"})
+            path = ("/" + CFG["admin_path"] + "/") if CFG.get("admin_path") else "/"
+            return self.send(200, {"ok": True}, headers={"Set-Cookie": f"oc=; Path={path}; Max-Age=0"})
 
         if path == "/api/info":
             return self.send(200, {
@@ -581,8 +813,9 @@ def cleanup_loop():
     while True:
         time.sleep(600)
         now = time.time()
-        for k in [k for k, v in SESSIONS.items() if v < now]:
+        for k in [k for k, v in SESSIONS.items() if v["exp"] < now]:
             SESSIONS.pop(k, None)
+            PENDING_TOTP.pop(k, None)
         with db() as c:
             c.execute("UPDATE tasks SET status='error', output='нет ответа от ПК (выключен или перезагружен во время выполнения)' WHERE status='sent' AND sent_at < ?", (int(now) - 7200,))
             c.execute("DELETE FROM log WHERE ts < ?", (int(now) - 90 * 86400,))

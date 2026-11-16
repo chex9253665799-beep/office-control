@@ -83,7 +83,7 @@ if [ -n "${OFFICE_PASS:-}" ]; then
 elif [ ! -f "$HOME_DIR/config.json" ]; then
   NEWPASS=$(tr -dc 'A-HJ-NP-Za-km-z2-9' </dev/urandom | head -c 14)
 fi
-NEWPASS="$NEWPASS" HOST="$HOST" PORT="$PANEL_PORT" THUMB="$THUMB" CFG="$HOME_DIR/config.json" python3 - <<'PY'
+APATH="${OFFICE_ADMIN_PATH:-}" NEWPASS="$NEWPASS" HOST="$HOST" PORT="$PANEL_PORT" THUMB="$THUMB" CFG="$HOME_DIR/config.json" python3 - <<'PY'
 import json, os, secrets, hashlib
 p = os.environ["CFG"]
 c = json.load(open(p)) if os.path.exists(p) else {}
@@ -92,12 +92,19 @@ c["rd_host"] = os.environ["HOST"]
 c["public_url"] = f"https://{os.environ['HOST']}:{c['port']}"
 c["thumb"] = os.environ["THUMB"]
 c.setdefault("enroll_token", secrets.token_urlsafe(24))
+ap = os.environ.get("APATH", "").strip().strip("/")
+if ap:   # секретный адрес админки: https://сервер:порт/<ap>/
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", ap):
+        raise SystemExit("Секретный адрес: 8–64 символа, только латиница, цифры, - и _")
+    c["admin_path"] = ap
 if os.environ.get("NEWPASS"):
     salt = secrets.token_hex(16)
     c["admin_hash"] = salt + "$" + hashlib.pbkdf2_hmac("sha256", os.environ["NEWPASS"].encode(), salt.encode(), 200_000).hex()
 json.dump(c, open(p, "w"), indent=2)
 PY
 PANEL_PORT=$(python3 -c "import json;print(json.load(open('$HOME_DIR/config.json'))['port'])")
+ADMIN_PATH=$(python3 -c "import json;print(json.load(open('$HOME_DIR/config.json')).get('admin_path',''))")
 # смена пароля администратора: office-passwd
 cat > /usr/local/sbin/office-passwd <<EOF
 #!/usr/bin/env bash
@@ -177,7 +184,7 @@ done
 
 echo
 say "═══════════════════════════════════════════════════════════"
-say " Панель офиса:  https://$HOST:$PANEL_PORT"
+say " Панель офиса:  https://$HOST:$PANEL_PORT/$ADMIN_PATH${ADMIN_PATH:+/}"
 if [ -n "$NEWPASS" ] && [ "$SHOWPASS" = 0 ]; then
   echo " Пароль: тот, что задан в секрете PANEL_PASS"
 elif [ -n "$NEWPASS" ]; then

@@ -70,9 +70,27 @@ pre{background:#0b0f16;border:1px solid var(--line);border-radius:8px;padding:9p
 <body>
 <div id="login" class="login" style="display:none">
   <h1>🖥 Панель офиса</h1>
-  <input id="pw" type="password" placeholder="Пароль администратора" autofocus>
+  <input id="pw" type="password" placeholder="Пароль администратора" autocomplete="current-password" autofocus>
+  <input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Код из приложения (6 цифр)">
+  <div class="sub" style="margin:-6px 0 10px;font-size:12px">При первом входе код не нужен — панель предложит его настроить.</div>
   <div class="err" id="lerr"></div>
   <button class="pri" style="width:100%" onclick="login()">Войти</button>
+</div>
+
+<div id="setup2fa" class="login" style="display:none;max-width:420px">
+  <h1>🔐 Код для входа</h1>
+  <p class="sub" style="margin-top:0">Защита админки: кроме пароля при входе нужен будет 6-значный код с телефона.</p>
+  <ol style="padding-left:18px;line-height:1.6">
+    <li>Поставь на телефон <b>Яндекс Ключ</b> или <b>Google Authenticator</b>.</li>
+    <li>В приложении: <b>добавить</b> → <b>сканировать QR-код</b>, наведи на код ниже.</li>
+    <li>Введи 6 цифр, которые покажет приложение.</li>
+  </ol>
+  <div id="qr" style="text-align:center;margin:10px 0"></div>
+  <div class="sub" style="font-size:12px;text-align:center;word-break:break-all">Если не сканируется — введи ключ вручную:<br><code id="otpsec"></code></div>
+  <input id="otp2" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Код из приложения" style="margin-top:12px">
+  <div class="err" id="serr"></div>
+  <button class="pri" style="width:100%" onclick="confirm2fa()">Подтвердить</button>
+  <button style="width:100%;margin-top:8px" onclick="logout()">Выйти</button>
 </div>
 
 <div id="app" style="display:none">
@@ -152,22 +170,37 @@ function ago(ts){if(!ts)return '—';const s=Math.floor(Date.now()/1000-ts);if(s
 function dt(ts){return ts?new Date(ts*1000).toLocaleString('ru-RU'):'—'}
 function meter(p){p=Math.max(0,Math.min(100,p||0));return `<div class="meter"><i class="${p>90?'b':p>75?'w':''}" style="width:${p}%"></i></div>`}
 
-function showLogin(){$('app').style.display='none';$('login').style.display='block';$('pw').focus();clearInterval(timer)}
+function showLogin(){$('app').style.display='none';$('setup2fa').style.display='none';$('login').style.display='block';$('pw').focus();clearInterval(timer)}
 async function login(){
-  try{await api('/api/login',{method:'POST',body:JSON.stringify({password:$('pw').value})});$('pw').value='';start()}
+  $('lerr').textContent='';
+  try{await api('api/login',{method:'POST',body:JSON.stringify({password:$('pw').value,code:$('otp').value})});$('pw').value='';$('otp').value='';start()}
   catch(e){$('lerr').textContent=e.message}
 }
-$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
-async function logout(){await api('/api/logout',{method:'POST'}).catch(()=>{});showLogin()}
+$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('otp').focus()});
+$('otp').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
+$('otp2').addEventListener('keydown',e=>{if(e.key==='Enter')confirm2fa()});
+async function logout(){await api('api/logout',{method:'POST'}).catch(()=>{});showLogin()}
+
+async function show2fa(){
+  $('login').style.display='none';$('app').style.display='none';$('setup2fa').style.display='block';
+  const r=await api('api/2fa/new',{method:'POST'});
+  $('qr').innerHTML=r.svg;$('otpsec').textContent=r.secret.replace(/(.{4})/g,'$1 ').trim();$('otp2').value='';$('otp2').focus();
+}
+async function confirm2fa(){
+  $('serr').textContent='';
+  try{await api('api/2fa/confirm',{method:'POST',body:JSON.stringify({code:$('otp2').value})});$('setup2fa').style.display='none';toast('Код настроен. Теперь при входе нужен пароль и код из приложения.');start()}
+  catch(e){$('serr').textContent=e.message}
+}
 
 async function start(){
-  INFO=await api('/api/info');
-  $('login').style.display='none';$('app').style.display='block';
+  INFO=await api('api/info');
+  if(INFO.setup2fa)return show2fa();
+  $('login').style.display='none';$('setup2fa').style.display='none';$('app').style.display='block';
   const groups={};INFO.scripts.forEach(s=>(groups[s.group]=groups[s.group]||[]).push(s));
   $('scr').innerHTML=Object.entries(groups).map(([g,l])=>`<optgroup label="${esc(g)}">`+l.map(s=>`<option value="${s.id}">${esc(s.title)}${s.danger?' ⚠':''}</option>`).join('')+'</optgroup>').join('');
   argsUI();await load();clearInterval(timer);timer=setInterval(()=>{load();if(OPEN)openPc(OPEN,true)},10000);
 }
-async function load(){PCS=await api('/api/pcs');render()}
+async function load(){PCS=await api('api/pcs');render()}
 
 function render(){
   const q=$('q').value.trim().toLowerCase(), g=$('grpf').value, on=$('onlyon').checked;
@@ -213,26 +246,26 @@ async function runScript(){
   const s=INFO.scripts.find(x=>x.id===$('scr').value), args={};
   document.querySelectorAll('#args input').forEach(i=>args[i.dataset.a]=i.value);
   if(s.danger&&!confirm(`«${s.title}» на ${SEL.size} ПК — точно?`))return;
-  try{const r=await api('/api/run',{method:'POST',body:JSON.stringify({pcs:[...SEL],script:s.id,args})});toast(`Отправлено на ${r.count} ПК — выполнится в течение ~20 секунд`);load()}catch(e){toast('⚠ '+e.message)}
+  try{const r=await api('api/run',{method:'POST',body:JSON.stringify({pcs:[...SEL],script:s.id,args})});toast(`Отправлено на ${r.count} ПК — выполнится в течение ~20 секунд`);load()}catch(e){toast('⚠ '+e.message)}
 }
 async function runPs(){
   const ps=$('ps').value.trim();if(!ps)return;
   if(!confirm(`Выполнить свою команду на ${SEL.size} ПК?`))return;
-  try{const r=await api('/api/run',{method:'POST',body:JSON.stringify({pcs:[...SEL],ps,as_user:$('asuser').checked})});toast(`Отправлено на ${r.count} ПК`);load()}catch(e){toast('⚠ '+e.message)}
+  try{const r=await api('api/run',{method:'POST',body:JSON.stringify({pcs:[...SEL],ps,as_user:$('asuser').checked})});toast(`Отправлено на ${r.count} ПК`);load()}catch(e){toast('⚠ '+e.message)}
 }
 async function sendFile(){
   const f=$('file').files[0];if(!f)return toast('Выбери файл');
   toast('Загружаю файл на сервер…');
   try{
-    const r=await fetch('/api/upload',{method:'POST',credentials:'same-origin',headers:{'X-Name':encodeURIComponent(f.name)},body:f});
+    const r=await fetch('api/upload',{method:'POST',credentials:'same-origin',headers:{'X-Name':encodeURIComponent(f.name)},body:f});
     const j=await r.json();if(!r.ok)throw new Error(j.error);
-    const x=await api('/api/run',{method:'POST',body:JSON.stringify({pcs:[...SEL],file:j.id,dest:$('dest').value,run:$('frun').checked,run_args:$('fargs').value})});
+    const x=await api('api/run',{method:'POST',body:JSON.stringify({pcs:[...SEL],file:j.id,dest:$('dest').value,run:$('frun').checked,run_args:$('fargs').value})});
     toast(`Файл отправлен на ${x.count} ПК`);load();
   }catch(e){toast('⚠ '+e.message)}
 }
 
 async function openPc(id,quiet){
-  OPEN=id;let p;try{p=await api('/api/pc/'+id)}catch(e){return}
+  OPEN=id;let p;try{p=await api('api/pc/'+id)}catch(e){return}
   const i=p.info||{};$('dtitle').textContent=(p.alias||p.hostname)+(p.online?' 🟢':' ⚪');
   const pass=p.rd_pass?`?password=${encodeURIComponent(p.rd_pass)}`:'';
   const scrollTop=$('dbody').scrollTop, progQ=$('progq')?$('progq').value:'';
@@ -278,9 +311,9 @@ async function openPc(id,quiet){
 }
 function filterProg(){const q=($('progq')||{}).value?.toLowerCase()||'';document.querySelectorAll('#progs .prog').forEach(d=>d.style.display=d.textContent.toLowerCase().includes(q)?'':'none')}
 function closeDrawer(){$('drawer').classList.remove('show');OPEN=null}
-async function savePc(id){try{await api('/api/pc/'+id,{method:'POST',body:JSON.stringify({alias:$('ealias').value,grp:$('egrp').value,notes:$('enotes').value})});toast('Сохранено');load()}catch(e){toast('⚠ '+e.message)}}
-async function delPc(id){if(!confirm('Убрать этот ПК из панели?'))return;await api('/api/pc/'+id,{method:'DELETE'});closeDrawer();load()}
-async function cancelTask(id){await api('/api/task/'+id,{method:'DELETE'});openPc(OPEN,true)}
+async function savePc(id){try{await api('api/pc/'+id,{method:'POST',body:JSON.stringify({alias:$('ealias').value,grp:$('egrp').value,notes:$('enotes').value})});toast('Сохранено');load()}catch(e){toast('⚠ '+e.message)}}
+async function delPc(id){if(!confirm('Убрать этот ПК из панели?'))return;await api('api/pc/'+id,{method:'DELETE'});closeDrawer();load()}
+async function cancelTask(id){await api('api/task/'+id,{method:'DELETE'});openPc(OPEN,true)}
 
 function modal(html){$('mbox').innerHTML=html+'<div style="text-align:right;margin-top:14px"><button onclick="closeModal()">Закрыть</button></div>';$('modal').classList.add('show')}
 function closeModal(){$('modal').classList.remove('show')}
@@ -298,7 +331,7 @@ function showMy(){
   modal(`<h3 style="margin-top:0">Подключаться с моего ПК или телефона</h3>
   <p>Кнопки «Экран» и «Файлы» открывают программу <b>RustDesk</b> на твоём компьютере. Её нужно один раз поставить и направить на твой сервер:</p>
   <ol>
-   <li>Скачай RustDesk: <a href="https://rustdesk.com/download" target="_blank" style="color:#93c5fd">rustdesk.com/download</a> (или с панели: <a href="/dl/rustdesk.exe" style="color:#93c5fd">rustdesk.exe</a>) и установи.</li>
+   <li>Скачай RustDesk: <a href="https://rustdesk.com/download" target="_blank" style="color:#93c5fd">rustdesk.com/download</a> (или с панели: <a href="dl/rustdesk.exe" style="color:#93c5fd">rustdesk.exe</a>) и установи.</li>
    <li>В RustDesk: ⋮ рядом с ID → <b>Сеть</b> → <b>Сервер ID/ретрансляции</b>, заполни:</li></ol>
   <div class="kv"><div>ID-сервер</div><div class="copy"><pre id="h1">${esc(INFO.rd_host)}</pre>${copyBtn('h1')}</div>
   <div>Сервер ретрансляции</div><div class="copy"><pre id="h2">${esc(INFO.rd_host)}</pre>${copyBtn('h2')}</div>
@@ -306,11 +339,11 @@ function showMy(){
   <p class="sub">На телефоне (RustDesk для Android) — то же самое: Настройки → Сервер ID/ретрансляции. После этого «Экран» в панели открывает нужный ПК сразу, без ввода пароля.</p>`);
 }
 async function showLog(){
-  const l=await api('/api/log');
+  const l=await api('api/log');
   modal(`<h3 style="margin-top:0">Журнал</h3>`+l.map(r=>`<div style="padding:5px 0;border-bottom:1px solid var(--line)"><span class="sub">${dt(r.ts)} · ${esc(r.who)}</span><br>${esc(r.text)}</div>`).join(''));
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeDrawer()}});
-api('/api/info').then(start).catch(()=>showLogin());
+api('api/info').then(start).catch(()=>showLogin());
 </script>
 </body>
 </html>
