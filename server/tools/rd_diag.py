@@ -36,6 +36,8 @@ def mask(t):
 
 
 name = sys.argv[1] if len(sys.argv) > 1 else ""
+if len(sys.argv) > 2:   # другой скрипт PowerShell вместо стандартной диагностики
+    PS = open(sys.argv[2], encoding="utf-8").read()
 c = sqlite3.connect("/opt/office/office.db", timeout=30)
 c.row_factory = sqlite3.Row
 pc = c.execute("SELECT id, hostname FROM pcs WHERE hostname LIKE ? ORDER BY last_seen DESC LIMIT 1", (f"%{name}%",)).fetchone()

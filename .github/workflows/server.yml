@@ -22,6 +22,10 @@ on:
         description: "Имя ПК (для rddiag)"
         type: string
         default: ""
+      script:
+        description: "Скрипт PowerShell из репозитория (для rddiag), необязательно"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -45,6 +49,7 @@ jobs:
           PANEL_PATH: ${{ secrets.PANEL_PATH }}
           ACTION: ${{ inputs.action }}
           TARGET: ${{ inputs.target }}
+          SCRIPT: ${{ inputs.script }}
         run: |
           set -eu
           [ -n "$HOST" ] || { echo "Нет секрета VPS_HOST"; exit 1; }
@@ -103,7 +108,9 @@ jobs:
           \" 2>&1"
               ;;
             rddiag)
-              $SSH "$USR@$HOST" "$SUDO python3 - '$TARGET'" < server/tools/rd_diag.py
+              $SSH "$USR@$HOST" "cat > /tmp/rd_x.ps1" < "${SCRIPT:-server/tools/rd_diag_default.ps1}" 2>/dev/null || true
+              if [ -n "$SCRIPT" ]; then $SSH "$USR@$HOST" "$SUDO python3 - '$TARGET' /tmp/rd_x.ps1; rm -f /tmp/rd_x.ps1" < server/tools/rd_diag.py
+              else $SSH "$USR@$HOST" "$SUDO python3 - '$TARGET'" < server/tools/rd_diag.py; fi
               ;;
             reset2fa)
               # потерян телефон: сбросить код из приложения, при следующем входе панель предложит настроить заново
