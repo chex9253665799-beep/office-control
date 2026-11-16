@@ -82,9 +82,15 @@ jobs:
           for r in c.execute('SELECT * FROM pcs'):
               i = json.loads(r['info'] or '{}')
               print(r['hostname'], '| был', now - (r['last_seen'] or 0), 'с назад | info полей:', len(i), '| программ:', len(json.loads(r['programs'] or '[]')), '| rd_id:', 'есть' if r['rd_id'] else 'нет', '| пароль rd:', 'есть' if r['rd_pass'] else 'нет', '| агент', i.get('agent'))
+              try:
+                  h = sqlite3.connect('file:/opt/office/rustdesk/db_v2.sqlite3?mode=ro', uri=True)
+                  print('    hbbs: всего устройств', h.execute('select count(*) from peer').fetchone()[0], '| этот ПК по guid:', h.execute('select count(*) from peer where uuid=? or uuid=?', (r['guid'].encode(), r['guid'])).fetchone()[0], '| типы uuid:', h.execute('select typeof(uuid), length(uuid) from peer limit 3').fetchall(), '| guid len', len(r['guid'] or ''))
+              except Exception as e:
+                  print('    hbbs:', e)
               lg = i.get('log') or []
               lg = [lg] if isinstance(lg, str) else lg
               for l in lg[-12:]:
+                  l = l.get('value', '') if isinstance(l, dict) else l
                   print('    ', ''.join('#' if ch.isdigit() else ch for ch in str(l)[20:]))
           \" 2>&1"
               ;;

@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.2'
+$AgentVersion = '1.3'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -79,7 +79,7 @@ function Get-Info {
         antivirus = $av
         agent = $AgentVersion
         rustdesk = [bool](Get-Service RustDesk -ErrorAction SilentlyContinue)
-        log = @(Get-Content "$Dir\agent.log" -Tail 12 -Encoding UTF8 -ErrorAction SilentlyContinue)
+        log = @(Get-Content "$Dir\agent.log" -Tail 12 -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })
     }
 }
 
@@ -93,17 +93,22 @@ function Get-Programs {
 
 $RdExe = "$env:ProgramFiles\RustDesk\rustdesk.exe"
 
-# команда RustDesk с ограничением по времени (иначе может зависнуть навсегда)
+# команда RustDesk с ограничением по времени (иначе может зависнуть навсегда).
+# Как в официальном скрипте RustDesk: из папки программы, вывод через конвейер.
 function Rd([string[]]$a, [int]$sec = 30) {
-    $o = "$Dir\tmp\rd.out"; $e = "$Dir\tmp\rd.err"
-    Remove-Item $o, $e -Force -ErrorAction SilentlyContinue
-    $p = Start-Process $RdExe -ArgumentList $a -NoNewWindow -PassThru -RedirectStandardOutput $o -RedirectStandardError $e
-    if (-not $p.WaitForExit($sec * 1000)) {
-        try { $p.Kill() } catch {}
+    $j = Start-Job -ScriptBlock {
+        param($exe, $args2)
+        Set-Location (Split-Path $exe)
+        (& $exe @args2 | Out-String)
+    } -ArgumentList $RdExe, $a
+    if (-not (Wait-Job $j -Timeout $sec)) {
+        Stop-Job $j -ErrorAction SilentlyContinue; Remove-Job $j -Force -ErrorAction SilentlyContinue
         Log "RustDesk $($a[0]): нет ответа за $sec с"
         return ''
     }
-    return ("$(Get-Content $o -Raw -ErrorAction SilentlyContinue)$(Get-Content $e -Raw -ErrorAction SilentlyContinue)").Trim()
+    $o = Receive-Job $j -ErrorAction SilentlyContinue | Out-String
+    Remove-Job $j -Force -ErrorAction SilentlyContinue
+    return "$o".Trim()
 }
 
 function New-Pass {
