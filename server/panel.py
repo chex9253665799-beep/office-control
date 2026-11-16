@@ -512,6 +512,8 @@ class H(BaseHTTPRequestHandler):
             return self.not_found()
 
         # ---------- вход
+        if path == "/api/hello":   # нужен ли код из приложения (для формы входа)
+            return self.send(200, {"code": bool(CFG.get("totp"))})
         if path == "/api/login" and method == "POST":
             return self.login()
         if path in ("/", "/index.html"):
