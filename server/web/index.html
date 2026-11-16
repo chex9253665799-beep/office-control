@@ -262,6 +262,7 @@ async function openPc(id,quiet){
       <div>RustDesk</div><div>${p.rd_id?`ID <b>${esc(p.rd_id)}</b> · пароль <code>${esc(p.rd_pass||'—')}</code>`:'ещё не настроен'}</div>
       <div>Агент</div><div>${esc(i.agent||'—')} · в панели с ${dt(p.first_seen)}</div>
     </div>
+    ${(i.log&&i.log.length)?`<details ${p.rd_id?'':'open'}><summary class="sub" style="cursor:pointer;margin-top:10px">Журнал агента</summary><pre>${esc([].concat(i.log).join('\n'))}</pre></details>`:''}
     <h3>Задания</h3>
     ${(p.tasks||[]).map(t=>`<div class="task"><span class="st ${t.status}">${{pending:'ждёт',sent:'выполняется',done:'готово',error:'ошибка'}[t.status]}</span> <b>${esc(t.title)}</b> <span class="sub">${dt(t.created)}</span>
       ${t.status==='pending'?` <button class="sm" onclick="cancelTask(${t.id})">отменить</button>`:''}

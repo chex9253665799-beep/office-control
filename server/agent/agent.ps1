@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.1'
+$AgentVersion = '1.2'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -79,6 +79,7 @@ function Get-Info {
         antivirus = $av
         agent = $AgentVersion
         rustdesk = [bool](Get-Service RustDesk -ErrorAction SilentlyContinue)
+        log = @(Get-Content "$Dir\agent.log" -Tail 12 -Encoding UTF8 -ErrorAction SilentlyContinue)
     }
 }
 
@@ -111,6 +112,40 @@ function New-Pass {
 }
 
 # Поставить RustDesk (если нет), направить на наш сервер, задать постоянный пароль. Возвращает $true, если пароль новый.
+# настройки службы RustDesk (служба работает от системы, её настройки — здесь)
+$RdCfgDir = "$env:windir\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
+
+# записать key = 'value' в файл настроек RustDesk (в раздел [section] или в начало, если раздела нет)
+function Set-Toml([string]$file, [string]$section, [hashtable]$values) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $file) | Out-Null
+    $lines = New-Object System.Collections.Generic.List[string]
+    if (Test-Path $file) { foreach ($l in [IO.File]::ReadAllLines($file)) { $lines.Add($l) } }
+    foreach ($k in $values.Keys) {
+        $line = "$k = '$($values[$k])'"
+        # границы раздела
+        $from = 0; $to = $lines.Count
+        if ($section) {
+            $h = $lines.IndexOf("[$section]")
+            if ($h -lt 0) { $lines.Add(''); $lines.Add("[$section]"); $h = $lines.Count - 1 }
+            $from = $h + 1; $to = $lines.Count
+            for ($i = $from; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*\[') { $to = $i; break } }
+        } else {
+            for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*\[') { $to = $i; break } }
+        }
+        $done = $false
+        for ($i = $from; $i -lt $to; $i++) { if ($lines[$i] -match "^\s*$([regex]::Escape($k))\s*=") { $lines[$i] = $line; $done = $true; break } }
+        if (-not $done) { $lines.Insert($to, $line) }
+    }
+    [IO.File]::WriteAllLines($file, $lines, (New-Object Text.UTF8Encoding $false))
+}
+
+function Get-TomlValue([string]$file, [string]$key) {
+    if (-not (Test-Path $file)) { return '' }
+    $m = Select-String -Path $file -Pattern "^\s*$([regex]::Escape($key))\s*=\s*'([^']*)'" | Select-Object -First 1
+    if ($m) { return $m.Matches[0].Groups[1].Value } else { return '' }
+}
+
+# Поставить RustDesk (если нет), направить на наш сервер, задать постоянный пароль. Возвращает $true, если что-то изменилось.
 function Ensure-RustDesk([bool]$newPass = $false) {
     if (-not (Test-Path $RdExe)) {
         Log 'RustDesk не найден — ставлю'
@@ -121,29 +156,54 @@ function Ensure-RustDesk([bool]$newPass = $false) {
         for ($i = 0; $i -lt 90 -and -not ((Test-Path $RdExe) -and (Get-Service RustDesk -ErrorAction SilentlyContinue)); $i++) { Start-Sleep 2 }
         Start-Sleep 10
         if (-not (Test-Path $RdExe)) { Log 'RustDesk не установился'; return $false }
+        Log 'RustDesk установлен'
     }
-    if ((Get-Service RustDesk -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service RustDesk -ErrorAction SilentlyContinue; Start-Sleep 3 }
-    if ((Rd '--option', 'custom-rendezvous-server') -ne '__RD_HOST__') {
-        Rd '--option', 'custom-rendezvous-server', '__RD_HOST__' | Out-Null
+    $restart = $false
+    $cfg2 = "$RdCfgDir\RustDesk2.toml"
+    $cfg1 = "$RdCfgDir\RustDesk.toml"
+
+    # 1) сервер офиса
+    if ((Get-TomlValue $cfg2 'custom-rendezvous-server') -ne '__RD_HOST__' -or (Get-TomlValue $cfg2 'key') -ne '__RD_KEY__') {
+        $r = Rd '--option', 'custom-rendezvous-server', '__RD_HOST__'
         Rd '--option', 'relay-server', '__RD_HOST__' | Out-Null
         Rd '--option', 'key', '__RD_KEY__' | Out-Null
+        Start-Sleep 2
+        if ((Get-TomlValue $cfg2 'custom-rendezvous-server') -ne '__RD_HOST__') {
+            # команда не сработала — пишем настройки службы напрямую
+            Log "RustDesk --option не сработал ($r) — пишу настройки в файл"
+            Set-Toml $cfg2 'options' @{ 'custom-rendezvous-server' = '__RD_HOST__'; 'relay-server' = '__RD_HOST__'; 'key' = '__RD_KEY__' }
+            $restart = $true
+        }
         Log 'RustDesk направлен на сервер офиса'
     }
+
+    # 2) постоянный пароль
     $changed = $false
     if ($newPass -or -not $cfg.rd_pass) {
         $p = New-Pass
         $res = Rd '--password', $p
-        if ($res -match 'Done') {
-            $cfg | Add-Member -NotePropertyName rd_pass -NotePropertyValue $p -Force
-            Save-Cfg; $changed = $true; Log 'пароль RustDesk задан'
-        } else { Log "пароль RustDesk не задан: $res" }
+        if ($res -notmatch 'Done') {
+            # запасной путь: пароль открытым текстом в настройки службы, RustDesk сам зашифрует при запуске
+            Log "RustDesk --password: '$res' — пишу пароль в файл"
+            Set-Toml $cfg1 '' @{ 'password' = $p }
+            $restart = $true
+        }
+        $cfg | Add-Member -NotePropertyName rd_pass -NotePropertyValue $p -Force
+        Save-Cfg; $changed = $true; Log 'пароль RustDesk задан'
     }
-    $id = Rd '--get-id'
-    if ($id -notmatch '^\d{6,}$') {   # запасной путь: ID из настроек службы RustDesk
-        $toml = "$env:windir\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config\RustDesk.toml"
-        if (Test-Path $toml) { $m = Select-String -Path $toml -Pattern "^id\s*=\s*'(\d+)'" | Select-Object -First 1; if ($m) { $id = $m.Matches[0].Groups[1].Value } }
+
+    if ($restart) { Restart-Service RustDesk -Force -ErrorAction SilentlyContinue; Start-Sleep 8 }
+    elseif ((Get-Service RustDesk -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service RustDesk -ErrorAction SilentlyContinue; Start-Sleep 5 }
+
+    # 3) ID
+    $id = (Rd '--get-id') -replace '\s', ''
+    if ($id -notmatch '^\d{6,}$') {
+        $id = Get-TomlValue $cfg1 'id'
+        if ($id -notmatch '^\d{6,}$') { Log 'RustDesk: ID пока нет'; $script:RdRetry = $true }
     }
-    if ($id -match '^\d{6,}$' -and $id -ne $cfg.rd_id) { $cfg | Add-Member -NotePropertyName rd_id -NotePropertyValue $id -Force; Save-Cfg; $changed = $true }
+    if ($id -match '^\d{6,}$' -and $id -ne $cfg.rd_id) {
+        $cfg | Add-Member -NotePropertyName rd_id -NotePropertyValue $id -Force; Save-Cfg; $changed = $true; Log "RustDesk ID $id"
+    }
     return $changed
 }
 
@@ -242,7 +302,8 @@ while ($true) {
         foreach ($t in @($resp.tasks)) { if ($t) { Log "задание $($t.id): $($t.title)"; try { Start-Task $t } catch { Send-Result $t.id $false "Ошибка: $($_.Exception.Message)" 1 } } }
         Check-Running
         # RustDesk — после отчёта, чтобы ПК сразу был виден в панели
-        if ($ForceRd -or ((Get-Date) - $lastRd).TotalMinutes -ge 30) {
+        if ($ForceRd -or ((Get-Date) - $lastRd).TotalMinutes -ge $(if ($script:RdRetry) { 2 } else { 30 })) {
+            $script:RdRetry = $false
             $ForceRd = $false; $lastRd = Get-Date
             try { Ensure-RustDesk | Out-Null } catch { Log "RustDesk: $($_.Exception.Message)" }
         }
