@@ -354,6 +354,8 @@ class H(BaseHTTPRequestHandler):
         with LOCK, db() as c:
             c.execute("UPDATE tasks SET status=?, done_at=?, output=?, code=? WHERE id=? AND pc_id=?",
                       (status, int(time.time()), out, d.get("code"), int(d.get("id", 0)), pc["id"]))
+            t = c.execute("SELECT kind, payload FROM tasks WHERE id=? AND pc_id=?", (int(d.get("id", 0)), pc["id"])).fetchone()
+            drop_file_if_delivered(c, task_file_id(t))
         return self.send(200, {"ok": True})
 
     def send_file(self, path, name):
@@ -481,6 +483,7 @@ class H(BaseHTTPRequestHandler):
                 t = c.execute("SELECT * FROM tasks WHERE id=?", (int(m.group(1)),)).fetchone()
                 if method == "DELETE" and t and t["status"] == "pending":
                     c.execute("DELETE FROM tasks WHERE id=?", (t["id"],))
+                    drop_file_if_delivered(c, task_file_id(t))
                     return self.send(200, {"ok": True})
             return self.send(200, dict(t) if t else {})
 
@@ -515,6 +518,31 @@ class H(BaseHTTPRequestHandler):
         return self.send(404, {"error": "нет такого"})
 
 
+def drop_file_if_delivered(c, fid):
+    """Файл больше не нужен на сервере: все ПК, куда его отправили, его уже получили (или задания закрыты)."""
+    if not re.fullmatch(r"[0-9a-f]{32}", fid or ""):
+        return
+    rows = c.execute("SELECT status FROM tasks WHERE kind='file' AND payload LIKE ?", (f'%"{fid}"%',)).fetchall()
+    if not rows or any(r["status"] in ("pending", "sent") for r in rows):
+        return
+    f = c.execute("SELECT name FROM files WHERE id=?", (fid,)).fetchone()
+    try:
+        os.remove(os.path.join(UPLOADS, fid))
+    except OSError:
+        pass
+    if f:
+        c.execute("DELETE FROM files WHERE id=?", (fid,))
+        # пишем журнал в той же транзакции (отдельное соединение упёрлось бы в блокировку базы)
+        c.execute("INSERT INTO log(ts, who, text) VALUES(?,?,?)", (int(time.time()), "панель", f"файл {f['name']} доставлен и удалён с сервера"))
+
+
+def task_file_id(t):
+    try:
+        return json.loads(t["payload"]).get("id") if t and t["kind"] == "file" else None
+    except (ValueError, TypeError):
+        return None
+
+
 def read_rd_key():
     try:
         return open(os.path.join(HOME, "rustdesk", "id_ed25519.pub"), encoding="utf-8").read().strip()
@@ -542,6 +570,15 @@ def cleanup_loop():
         with db() as c:
             c.execute("UPDATE tasks SET status='error', output='нет ответа от ПК (выключен или перезагружен во время выполнения)' WHERE status='sent' AND sent_at < ?", (int(now) - 7200,))
             c.execute("DELETE FROM log WHERE ts < ?", (int(now) - 90 * 86400,))
+            for f in c.execute("SELECT id, created FROM files").fetchall():
+                if c.execute("SELECT 1 FROM tasks WHERE kind='file' AND payload LIKE ? LIMIT 1", (f'%"{f["id"]}"%',)).fetchone():
+                    drop_file_if_delivered(c, f["id"])
+                elif (f["created"] or 0) < now - 86400:   # загружен, но так никуда и не отправлен
+                    try:
+                        os.remove(os.path.join(UPLOADS, f["id"]))
+                    except OSError:
+                        pass
+                    c.execute("DELETE FROM files WHERE id=?", (f["id"],))
 
 
 class Server(ThreadingHTTPServer):
