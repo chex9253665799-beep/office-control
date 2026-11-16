@@ -11,8 +11,8 @@ Get-Content "$d\RustDesk2.toml" -ErrorAction SilentlyContinue | ForEach-Object {
   elseif ($_ -match "^\s*([\w-]+)\s*=") { "$($Matches[1]) = …" } else { $_ } }
 '--- RustDesk.toml'
 Get-Content "$d\RustDesk.toml" -ErrorAction SilentlyContinue | ForEach-Object {
-  if ($_ -match "^\s*(password|salt|enc_id|id|key_pair)\s*=\s*'(.*)'") { "$($Matches[1]) = длина $($Matches[2].Length), начало '$($Matches[2].Substring(0, [Math]::Min(2, $Matches[2].Length)))'" }
-  elseif ($_ -match "^\s*([\w-]+)\s*=") { "$($Matches[1]) = …" } else { $_ } }
+  if ($_ -match "^\s*(password|salt|enc_id|id)\s*=\s*'(.*)'") { "$($Matches[1]) = длина $($Matches[2].Length), начало '$($Matches[2].Substring(0, [Math]::Min(2, $Matches[2].Length)))'" }
+  elseif ($_ -match "^\s*([\w-]+)\s*=") { "$($Matches[1]) = …" } elseif ($_ -match "^\s*\[") { $_ } } # прочие строки (ключи, массивы) не выводим
 '--- процессы RustDesk'
 Get-CimInstance Win32_Process -Filter "name='rustdesk.exe'" | ForEach-Object { "pid $($_.ProcessId) сеанс $($_.SessionId): $($_.CommandLine)" }
 (Get-Item "$env:ProgramFiles\RustDesk\rustdesk.exe").VersionInfo.ProductVersion
@@ -47,7 +47,8 @@ for _ in range(60):
     r = c.execute("SELECT status, output FROM tasks WHERE id=?", (tid,)).fetchone()
     if r["status"] in ("done", "error"):
         print("статус:", r["status"])
-        print(mask(r["output"] or ""))
+        out = "\n".join(l for l in (r["output"] or "").splitlines() if not re.fullmatch(r"\s*\d+,?\s*|\s*[\[\]],?\s*", l))
+        print(mask(out))
         break
 else:
     print("нет ответа за 3 минуты")
