@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.9'
+$AgentVersion = '1.10'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -279,8 +279,10 @@ function Ensure-RustDesk([bool]$newPass = $false) {
     if ((Get-Service $script:C.svc -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service $script:C.svc -ErrorAction SilentlyContinue; Start-Sleep 5 }
 
     # 3) ID
-    $id = (Rd '--get-id') -replace '\s', ''
+    $rawId = Rd '--get-id'
+    $id = $rawId -replace '\s', ''
     if ($id -notmatch '^\d{6,}$') {
+        Log "$($script:C.title) --get-id ответил: '$rawId'"
         $id = Get-TomlValue $cfg1 'id'
         if ($id -notmatch '^\d{6,}$') { Log "$($script:C.title): ID пока нет"; $script:RdRetry = $true }
     }
@@ -412,7 +414,7 @@ while ($true) {
         if ($ForceRd -or ((Get-Date) - $lastRd).TotalMinutes -ge $(if ($script:RdRetry) { 2 } else { 30 })) {
             $script:RdRetry = $false
             $ForceRd = $false; $lastRd = Get-Date
-            try { Ensure-RustDesk | Out-Null } catch { Log "RustDesk: $($_.Exception.Message)" }
+            try { Ensure-RustDesk | Out-Null } catch { Log "$($script:C.title): $($_.Exception.Message) (строка $($_.InvocationInfo.ScriptLineNumber))" }
         }
         if ($resp.agent_version -and $resp.agent_version -ne $AgentVersion -and $Running.Count -eq 0) {
             # самообновление агента: новая версия с панели, задача Windows перезапустит через ≤5 минут
