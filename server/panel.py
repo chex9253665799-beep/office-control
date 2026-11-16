@@ -681,7 +681,7 @@ class H(BaseHTTPRequestHandler):
 
         if path == "/api/pcs":
             with db() as c:
-                rows = c.execute("SELECT id, hostname, alias, grp, notes, last_seen, first_seen, ip, info, rd_id, rd_pass FROM pcs ORDER BY grp, alias, hostname").fetchall()
+                rows = c.execute("SELECT id, hostname, alias, grp, notes, last_seen, first_seen, ip, info, rd_id, rd_pass, client FROM pcs ORDER BY grp, alias, hostname").fetchall()
                 pend = {r["pc_id"]: r["n"] for r in c.execute("SELECT pc_id, COUNT(*) n FROM tasks WHERE status IN ('pending','sent') GROUP BY pc_id")}
             out = []
             for r in rows:

@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.8'
+$AgentVersion = '1.9'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -207,20 +207,51 @@ function Install-Client {
     return $true
 }
 
-# После перехода на «Мост» — убрать RustDesk
+# После перехода на «Мост» — убрать RustDesk полностью: программу, службу, настройки, журналы, ярлыки, записи в реестре
 function Remove-OldRustDesk {
     $old = Join-Path $Clients.rustdesk.dir $Clients.rustdesk.exe
-    if (-not (Test-Path $old)) { return }
-    Log 'удаляю RustDesk (заменён «Мостом»)'
-    Rd '--uninstall' 120 $old | Out-Null
-    Start-Sleep 5
-    if (Test-Path $old) {
-        Stop-Service RustDesk -Force -ErrorAction SilentlyContinue
-        & sc.exe delete RustDesk | Out-Null
-        Get-Process rustdesk -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        Remove-Item $Clients.rustdesk.dir -Recurse -Force -ErrorAction SilentlyContinue
+    $users = @(Get-ChildItem "$env:SystemDrive\Users" -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin 'Public', 'Default', 'Default User', 'All Users' })
+    $paths = @(
+        $Clients.rustdesk.dir,
+        "${env:ProgramFiles(x86)}\RustDesk",
+        "$env:ProgramData\RustDesk",
+        "$env:windir\ServiceProfiles\LocalService\AppData\Roaming\RustDesk",
+        "$env:windir\ServiceProfiles\LocalService\AppData\Roaming\Мост",          # пробная установка с русским именем
+        "$env:windir\System32\config\systemprofile\AppData\Roaming\RustDesk",
+        "$env:windir\System32\config\systemprofile\AppData\Local\rustdesk",
+        "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\RustDesk",
+        "$env:PUBLIC\Desktop\RustDesk.lnk",
+        "$Dir\tmp\rustdesk.exe"
+    ) + ($users | ForEach-Object {
+        "$($_.FullName)\AppData\Roaming\RustDesk", "$($_.FullName)\AppData\Local\rustdesk",
+        "$($_.FullName)\Desktop\RustDesk.lnk", "$($_.FullName)\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\RustDesk.lnk",
+        "$($_.FullName)\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\RustDesk"
+    })
+    $left = @($paths | Where-Object { $_ -and (Test-Path $_) })
+    $svc = Get-Service RustDesk -ErrorAction SilentlyContinue
+    if (-not $left -and -not $svc) { return }
+    Log 'удаляю RustDesk полностью (заменён «Мостом»)'
+    # 1) штатное удаление
+    if (Test-Path $old) { Rd '--uninstall' 120 $old | Out-Null; Start-Sleep 5 }
+    # 2) служба и процессы
+    Stop-Service RustDesk -Force -ErrorAction SilentlyContinue
+    & sc.exe delete RustDesk 2>&1 | Out-Null
+    Get-Process rustdesk -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    # 3) папки, настройки, журналы, ярлыки
+    foreach ($p in $paths) { if ($p -and (Test-Path $p)) { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue } }
+    # 4) реестр: «Программы и компоненты», ссылки rustdesk://, автозапуск
+    foreach ($k in 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\RustDesk', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\RustDesk',
+                   'Registry::HKEY_CLASSES_ROOT\rustdesk', 'HKLM:\SOFTWARE\Classes\rustdesk') {
+        if (Test-Path $k) { Remove-Item $k -Recurse -Force -ErrorAction SilentlyContinue }
     }
-    Log $(if (Test-Path $old) { 'RustDesk удалить не удалось' } else { 'RustDesk удалён' })
+    foreach ($run in 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run') {
+        $item = Get-ItemProperty $run -ErrorAction SilentlyContinue
+        if ($item) { $item.PSObject.Properties | Where-Object { $_.Name -match 'rustdesk' -or "$($_.Value)" -match 'rustdesk' } | ForEach-Object { Remove-ItemProperty $run -Name $_.Name -ErrorAction SilentlyContinue } }
+    }
+    $still = @($paths | Where-Object { $_ -and (Test-Path $_) })
+    if ($still -or (Get-Service RustDesk -ErrorAction SilentlyContinue)) { Log "RustDesk удалён не полностью, осталось: $($still -join '; ')" }
+    else { Log 'RustDesk удалён полностью' }
 }
 
 # Поставить программу (если нет), направить на наш сервер, задать постоянный пароль. Возвращает $true, если что-то изменилось.
