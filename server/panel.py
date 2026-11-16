@@ -854,13 +854,15 @@ def install_cmd():
 def cleanup_loop():
     """Сессии, «зависшие» задания (отправлены, но ответа нет 2 часа) и старые журналы."""
     while True:
-        time.sleep(600)
+        time.sleep(60)
         now = time.time()
         for k in [k for k, v in SESSIONS.items() if v["exp"] < now]:
             SESSIONS.pop(k, None)
             PENDING_TOTP.pop(k, None)
         with db() as c:
             c.execute("UPDATE tasks SET status='error', output='нет ответа от ПК (выключен или перезагружен во время выполнения)' WHERE status='sent' AND sent_at < ?", (int(now) - 7200,))
+            # смена пароля перед подключением занимает секунды — если ответа нет 2 минуты, задание не висит
+            c.execute("UPDATE tasks SET status='error', output='нет ответа от ПК' WHERE kind='rd_reset' AND status IN ('sent','pending') AND created < ?", (int(now) - 120,))
             c.execute("DELETE FROM log WHERE ts < ?", (int(now) - 90 * 86400,))
             for f in c.execute("SELECT id, created FROM files").fetchall():
                 if c.execute("SELECT 1 FROM tasks WHERE kind='file' AND payload LIKE ? LIMIT 1", (f'%"{f["id"]}"%',)).fetchone():

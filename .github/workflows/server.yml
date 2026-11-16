@@ -17,7 +17,11 @@ on:
         description: "Что сделать"
         type: choice
         default: status
-        options: [install, status, logs, restart, pcs, reset2fa]
+        options: [install, status, logs, restart, pcs, reset2fa, rddiag]
+      target:
+        description: "Имя ПК (для rddiag)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -29,6 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - uses: actions/checkout@v4
       - name: SSH
         env:
           HOST: ${{ secrets.VPS_HOST }}
@@ -39,6 +44,7 @@ jobs:
           PANEL_PASS: ${{ secrets.PANEL_PASS }}
           PANEL_PATH: ${{ secrets.PANEL_PATH }}
           ACTION: ${{ inputs.action }}
+          TARGET: ${{ inputs.target }}
         run: |
           set -eu
           [ -n "$HOST" ] || { echo "Нет секрета VPS_HOST"; exit 1; }
@@ -95,6 +101,9 @@ jobs:
                   l = l.get('value', '') if isinstance(l, dict) else l
                   print('    ', ''.join('#' if ch.isdigit() else ch for ch in str(l)[20:]))
           \" 2>&1"
+              ;;
+            rddiag)
+              $SSH "$USR@$HOST" "$SUDO python3 - '$TARGET'" < server/tools/rd_diag.py
               ;;
             reset2fa)
               # потерян телефон: сбросить код из приложения, при следующем входе панель предложит настроить заново
