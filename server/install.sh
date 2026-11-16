@@ -74,7 +74,10 @@ if [ ! -f "$HOME_DIR/cert.pem" ]; then
 fi
 THUMB=$(openssl x509 -in "$HOME_DIR/cert.pem" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')
 NEWPASS=""
-if [ ! -f "$HOME_DIR/config.json" ]; then
+SHOWPASS=1
+if [ -n "${OFFICE_PASS:-}" ]; then
+  NEWPASS="$OFFICE_PASS"; SHOWPASS=0          # пароль задан снаружи (секрет) — не печатаем
+elif [ ! -f "$HOME_DIR/config.json" ]; then
   NEWPASS=$(tr -dc 'A-HJ-NP-Za-km-z2-9' </dev/urandom | head -c 14)
 fi
 NEWPASS="$NEWPASS" HOST="$HOST" PORT="$PANEL_PORT" THUMB="$THUMB" CFG="$HOME_DIR/config.json" python3 - <<'PY'
@@ -172,7 +175,9 @@ done
 echo
 say "═══════════════════════════════════════════════════════════"
 say " Панель офиса:  https://$HOST:$PANEL_PORT"
-if [ -n "$NEWPASS" ]; then
+if [ -n "$NEWPASS" ] && [ "$SHOWPASS" = 0 ]; then
+  echo " Пароль: тот, что задан в секрете PANEL_PASS"
+elif [ -n "$NEWPASS" ]; then
   say " Пароль:        $NEWPASS"
   echo " (сохрани его; сменить: office-passwd)"
 else

@@ -1,0 +1,77 @@
+name: Сервер
+
+# Обслуживание сервера по SSH. Запускает только владелец репозитория (кнопка Run workflow).
+# Секреты (Settings → Secrets and variables → Actions):
+#   VPS_HOST      — IP сервера
+#   VPS_USER      — пользователь (обычно root)
+#   VPS_PASSWORD  — пароль SSH (или вместо него VPS_KEY — приватный ключ)
+#   VPS_PORT      — порт SSH, если не 22 (необязательно)
+#   PANEL_PASS    — пароль для входа в панель офиса (придумай сам)
+# Логи репозитория открыты — секреты в них GitHub заменяет на ***.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Что сделать"
+        type: choice
+        default: status
+        options: [install, status, logs, restart]
+
+permissions:
+  contents: read
+
+concurrency: server
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: SSH
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USR: ${{ secrets.VPS_USER }}
+          PASS: ${{ secrets.VPS_PASSWORD }}
+          KEY: ${{ secrets.VPS_KEY }}
+          PORT: ${{ secrets.VPS_PORT }}
+          PANEL_PASS: ${{ secrets.PANEL_PASS }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          set -eu
+          [ -n "$HOST" ] || { echo "Нет секрета VPS_HOST"; exit 1; }
+          USR=${USR:-root}; PORT=${PORT:-22}
+          mkdir -p ~/.ssh; chmod 700 ~/.ssh
+          OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -p $PORT"
+          if [ -n "$KEY" ]; then
+            printf '%s\n' "$KEY" > ~/.ssh/id; chmod 600 ~/.ssh/id
+            SSH="ssh $OPTS -i $HOME/.ssh/id"
+          else
+            [ -n "$PASS" ] || { echo "Нет секрета VPS_PASSWORD или VPS_KEY"; exit 1; }
+            sudo apt-get install -y -qq sshpass >/dev/null
+            export SSHPASS="$PASS"
+            SSH="sshpass -e ssh $OPTS -o PreferredAuthentications=password -o PubkeyAuthentication=no"
+          fi
+          SUDO=""; [ "$USR" = root ] || SUDO="sudo -n"
+
+          case "$ACTION" in
+            install)
+              [ -n "$PANEL_PASS" ] || { echo "Нет секрета PANEL_PASS (пароль панели)"; exit 1; }
+              # пароль панели передаём через stdin, чтобы его не было в командной строке на сервере
+              printf '%s\n' "$PANEL_PASS" | $SSH "$USR@$HOST" \
+                "read -r P; curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/server/install.sh -o /tmp/office-install.sh && OFFICE_PASS=\"\$P\" OFFICE_HOST='$HOST' $SUDO -E bash /tmp/office-install.sh; rc=\$?; rm -f /tmp/office-install.sh; exit \$rc"
+              ;;
+            status)
+              $SSH "$USR@$HOST" "uname -a; . /etc/os-release && echo \"\$PRETTY_NAME\"; uptime; free -m; df -h / | tail -1;
+                for s in office-hbbs office-hbbr office-panel; do printf '%-14s ' \$s; systemctl is-active \$s 2>/dev/null || true; done;
+                echo '--- порты'; ss -lntu 2>/dev/null | grep -E ':(2111[5-9]|8443)\b' || echo 'порты панели не слушаются';
+                echo '--- брандмауэр'; (command -v ufw >/dev/null && ufw status) || echo 'ufw нет';
+                echo '--- проверка панели'; curl -sk -o /dev/null -w 'HTTP %{http_code}\n' https://127.0.0.1:8443/ || true"
+              ;;
+            logs)
+              $SSH "$USR@$HOST" "$SUDO journalctl -u office-panel -u office-hbbs -u office-hbbr -n 120 --no-pager"
+              ;;
+            restart)
+              $SSH "$USR@$HOST" "$SUDO systemctl restart office-hbbs office-hbbr office-panel && sleep 3 && systemctl is-active office-hbbs office-hbbr office-panel"
+              ;;
+          esac
