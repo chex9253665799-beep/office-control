@@ -217,8 +217,7 @@ function render(){
     const i=p.info||{}, c=(i.disks||[]).find(d=>d.name==='C:')||(i.disks||[])[0];
     const ram=i.ram_gb?Math.round(100*(i.ram_gb-i.ram_free_gb)/i.ram_gb):0;
     const disk=c&&c.size_gb?Math.round(100*(c.size_gb-c.free_gb)/c.size_gb):0;
-    const pass=p.rd_pass?`?password=${encodeURIComponent(p.rd_pass)}`:'';
-    const conn=p.rd_id?`<div class="btns"><a class="btn" href="rustdesk://connection/new/${esc(p.rd_id)}${pass}" title="Открыть экран этого ПК">Экран</a><a class="btn g" href="rustdesk://file-transfer/${esc(p.rd_id)}${pass}">Файлы</a></div><div class="sub">ID ${esc(p.rd_id)}</div>`:'<span class="sub">RustDesk ставится…</span>';
+    const conn=p.rd_id?`<div class="btns"><a class="btn" href="#" onclick="return rdOpen('${p.id}','connection/new',this)" title="Открыть экран этого ПК">Экран</a><a class="btn g" href="#" onclick="return rdOpen('${p.id}','file-transfer',this)">Файлы</a></div><div class="sub">ID ${esc(p.rd_id)}</div>`:'<span class="sub">RustDesk ставится…</span>';
     return `<tr class="${p.online?'':'off'}">
       <td><input type="checkbox" ${SEL.has(p.id)?'checked':''} onchange="sel('${p.id}',this.checked)"></td>
       <td><span class="dot ${p.online?'on':''}"></span><span class="name" onclick="openPc('${p.id}')">${esc(p.alias||p.hostname)}</span>
@@ -264,14 +263,36 @@ async function sendFile(){
   }catch(e){toast('⚠ '+e.message)}
 }
 
+// «Экран»/«Файлы»: агент ставит новый одноразовый пароль RustDesk, затем открываем RustDesk уже с ним
+let RD_BUSY=false;
+function rdOpen(id,mode,el){
+  if(RD_BUSY)return false;RD_BUSY=true;
+  const old=el.textContent;el.textContent='⏳ пароль…';
+  (async()=>{
+    let note='';
+    try{
+      const r=await api('api/connect/'+id,{method:'POST'});
+      let t={};
+      for(let i=0;i<45;i++){await new Promise(z=>setTimeout(z,1000));t=await api('api/task/'+r.task);if(t.status==='done'||t.status==='error')break}
+      if(t.status!=='done')note='ПК не ответил вовремя — пробую с прежним паролем';
+    }catch(e){note=e.message+' — пробую с прежним паролем'}
+    try{
+      const p=await api('api/pc/'+id);
+      if(note)toast('⚠ '+note);
+      location.href=`rustdesk://${mode}/${encodeURIComponent(p.rd_id)}?password=${encodeURIComponent(p.rd_pass||'')}`;
+    }catch(e){toast('⚠ '+e.message)}
+    finally{el.textContent=old;RD_BUSY=false}
+  })();
+  return false;
+}
+
 async function openPc(id,quiet){
   OPEN=id;let p;try{p=await api('api/pc/'+id)}catch(e){return}
   const i=p.info||{};$('dtitle').textContent=(p.alias||p.hostname)+(p.online?' 🟢':' ⚪');
-  const pass=p.rd_pass?`?password=${encodeURIComponent(p.rd_pass)}`:'';
   const scrollTop=$('dbody').scrollTop, progQ=$('progq')?$('progq').value:'';
   $('dbody').innerHTML=`
     <div class="btns" style="margin-bottom:12px">
-      ${p.rd_id?`<a class="btn" href="rustdesk://connection/new/${esc(p.rd_id)}${pass}">Открыть экран</a><a class="btn g" href="rustdesk://file-transfer/${esc(p.rd_id)}${pass}">Файлы</a>`:''}
+      ${p.rd_id?`<a class="btn" href="#" onclick="return rdOpen('${p.id}','connection/new',this)">Открыть экран</a><a class="btn g" href="#" onclick="return rdOpen('${p.id}','file-transfer',this)">Файлы</a>`:''}
       <button class="sm" onclick="SEL=new Set(['${p.id}']);render();closeDrawer();window.scrollTo(0,0)">Действия…</button>
     </div>
     <div class="kv">

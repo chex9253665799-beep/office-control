@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.5'
+$AgentVersion = '1.6'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -116,7 +116,6 @@ function New-Pass {
     -join (1..12 | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
 }
 
-# Поставить RustDesk (если нет), направить на наш сервер, задать постоянный пароль. Возвращает $true, если пароль новый.
 # настройки службы RustDesk (служба работает от системы, её настройки — здесь)
 $RdCfgDir = "$env:windir\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
 
@@ -161,6 +160,20 @@ function Get-TomlValue([string]$file, [string]$key) {
     if ($m) { return $m.Matches[0].Groups[1].Value } else { return '' }
 }
 
+# Новый постоянный пароль RustDesk. Возвращает пароль.
+function Set-RdPassword {
+    $p = New-Pass
+    $res = Rd '--password', $p
+    if ($res -notmatch 'Done') {
+        Log "RustDesk --password: '$res' — пишу пароль в файл"
+        Edit-RdConfig { Set-Toml "$RdCfgDir\RustDesk.toml" '' @{ 'password' = $p } }
+    }
+    $cfg | Add-Member -NotePropertyName rd_pass -NotePropertyValue $p -Force
+    Save-Cfg
+    Log 'пароль RustDesk задан'
+    return $p
+}
+
 # Поставить RustDesk (если нет), направить на наш сервер, задать постоянный пароль. Возвращает $true, если что-то изменилось.
 function Ensure-RustDesk([bool]$newPass = $false) {
     if (-not (Test-Path $RdExe)) {
@@ -194,17 +207,7 @@ function Ensure-RustDesk([bool]$newPass = $false) {
 
     # 2) постоянный пароль
     $changed = $false
-    if ($newPass -or -not $cfg.rd_pass) {
-        $p = New-Pass
-        $res = Rd '--password', $p
-        if ($res -notmatch 'Done') {
-            # запасной путь: пароль открытым текстом в настройки службы, RustDesk сам зашифрует при запуске
-            Log "RustDesk --password: '$res' — пишу пароль в файл"
-            Edit-RdConfig { Set-Toml $cfg1 '' @{ 'password' = $p } }
-        }
-        $cfg | Add-Member -NotePropertyName rd_pass -NotePropertyValue $p -Force
-        Save-Cfg; $changed = $true; Log 'пароль RustDesk задан'
-    }
+    if ($newPass -or -not $cfg.rd_pass) { Set-RdPassword | Out-Null; $changed = $true }
 
     if ($restart) { Restart-Service RustDesk -Force -ErrorAction SilentlyContinue; Start-Sleep 8 }
     elseif ((Get-Service RustDesk -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service RustDesk -ErrorAction SilentlyContinue; Start-Sleep 5 }
@@ -268,16 +271,17 @@ function Start-Task($t) {
             } catch { Send-Result $t.id $false "Ошибка: $($_.Exception.Message)" 1 }
         }
         'rd_reset' {
-            $ok = Ensure-RustDesk $true
-            Send-Result $t.id $ok $(if ($ok) { 'Новый пароль задан, он уже в панели' } else { 'Не удалось сменить пароль, см. журнал агента' }) $(if ($ok) { 0 } else { 1 })
-            $script:ForceRd = $true
+            $p = Set-RdPassword
+            Send-Result $t.id $true 'Новый пароль задан' 0 @{ rd_pass = $p }
         }
         default { Send-Result $t.id $false "Неизвестный тип задания: $($t.kind)" 1 }
     }
 }
 
-function Send-Result($id, $ok, $out, $code) {
-    try { Api '/a/result' @{ id = $id; ok = $ok; output = "$out"; code = $code } | Out-Null } catch { Log "не отправил результат $id : $($_.Exception.Message)" }
+function Send-Result($id, $ok, $out, $code, $extra = @{}) {
+    $body = @{ id = $id; ok = $ok; output = "$out"; code = $code }
+    foreach ($k in $extra.Keys) { $body[$k] = $extra[$k] }
+    try { Api '/a/result' $body | Out-Null } catch { Log "не отправил результат $id : $($_.Exception.Message)" }
 }
 
 function Check-Running {
@@ -337,5 +341,14 @@ while ($true) {
         Log "нет связи с панелью: $($_.Exception.Message)"
         Check-Running
     }
-    Start-Sleep -Seconds $interval
+    # до следующего отчёта — каждые 3 секунды проверяем, нет ли срочных заданий (подключение и т.п.)
+    $until = (Get-Date).AddSeconds($interval)
+    while ((Get-Date) -lt $until) {
+        Start-Sleep -Seconds 3
+        try {
+            $pr = Api '/a/poll' @{}
+            foreach ($t in @($pr.tasks)) { if ($t) { Log "задание $($t.id): $($t.title)"; try { Start-Task $t } catch { Send-Result $t.id $false "Ошибка: $($_.Exception.Message)" 1 } } }
+        } catch { }
+        Check-Running
+    }
 }

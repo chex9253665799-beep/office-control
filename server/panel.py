@@ -473,6 +473,12 @@ class H(BaseHTTPRequestHandler):
                 return self.send(401, {"error": "агент не зарегистрирован"})
             if path == "/a/report" and method == "POST":
                 return self.a_report(pc)
+            if path == "/a/poll" and method == "POST":   # между отчётами: только забрать задания (раз в 3 с)
+                now = int(time.time())
+                with LOCK, db() as c:
+                    c.execute("UPDATE pcs SET last_seen=? WHERE id=?", (now, pc["id"]))
+                    tasks = take_tasks(c, pc["id"], now)
+                return self.send(200, {"tasks": tasks})
             if path == "/a/result" and method == "POST":
                 return self.a_result(pc)
             m = re.match(r"^/a/file/([0-9a-f]{32})$", path)
@@ -537,10 +543,7 @@ class H(BaseHTTPRequestHandler):
             sets.append("rd_pass=?"); vals.append(str(d["rd_pass"])[:40])
         with LOCK, db() as c:
             c.execute(f"UPDATE pcs SET {', '.join(sets)} WHERE id=?", vals + [pc["id"]])
-            rows = c.execute("SELECT id, kind, payload, title FROM tasks WHERE pc_id=? AND status='pending' ORDER BY id LIMIT 10", (pc["id"],)).fetchall()
-            for r in rows:
-                c.execute("UPDATE tasks SET status='sent', sent_at=? WHERE id=?", (now, r["id"]))
-        tasks = [{"id": r["id"], "kind": r["kind"], "payload": r["payload"], "title": r["title"]} for r in rows]
+            tasks = take_tasks(c, pc["id"], now)
         need_programs = d.get("programs") is None and (now - (pc["programs_at"] or 0)) > 6 * 3600
         return self.send(200, {"tasks": tasks, "need_programs": need_programs, "interval": 20, "agent_version": AGENT_VERSION})
 
@@ -551,6 +554,8 @@ class H(BaseHTTPRequestHandler):
         with LOCK, db() as c:
             c.execute("UPDATE tasks SET status=?, done_at=?, output=?, code=? WHERE id=? AND pc_id=?",
                       (status, int(time.time()), out, d.get("code"), int(d.get("id", 0)), pc["id"]))
+            if d.get("rd_pass"):   # новый пароль RustDesk — сразу в панель, не дожидаясь отчёта
+                c.execute("UPDATE pcs SET rd_pass=? WHERE id=?", (str(d["rd_pass"])[:40], pc["id"]))
             t = c.execute("SELECT kind, payload FROM tasks WHERE id=? AND pc_id=?", (int(d.get("id", 0)), pc["id"])).fetchone()
             drop_file_if_delivered(c, task_file_id(t))
         return self.send(200, {"ok": True})
@@ -711,6 +716,19 @@ class H(BaseHTTPRequestHandler):
             log("админ", f"{title} → {', '.join(names)}")
             return self.send(200, {"ok": True, "count": len(pcs)})
 
+        m = re.match(r"^/api/connect/([0-9a-f]{16})$", path)
+        if m and method == "POST":   # «Экран»/«Файлы»: сначала новый одноразовый пароль RustDesk
+            with LOCK, db() as c:
+                r = c.execute("SELECT hostname, alias, rd_id, last_seen FROM pcs WHERE id=?", (m.group(1),)).fetchone()
+                if not r or not r["rd_id"]:
+                    raise ValueError("На этом ПК RustDesk ещё не настроен")
+                if now - (r["last_seen"] or 0) >= ONLINE_SEC:
+                    raise ValueError("ПК не в сети")
+                cur = c.execute("INSERT INTO tasks(pc_id, created, title, kind, payload) VALUES(?,?,?,?,?)",
+                                (m.group(1), now, "Подключение: новый пароль RustDesk", "rd_reset", ""))
+            log("админ", f"подключение к {r['alias'] or r['hostname']}")
+            return self.send(200, {"task": cur.lastrowid})
+
         m = re.match(r"^/api/task/(\d+)$", path)
         if m:
             with db() as c:
@@ -750,6 +768,14 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, [dict(r) for r in c.execute("SELECT * FROM log ORDER BY id DESC LIMIT 300")])
 
         return self.send(404, {"error": "нет такого"})
+
+
+def take_tasks(c, pc_id, now):
+    """Задания для ПК: помечаются «выполняется» и отдаются агенту."""
+    rows = c.execute("SELECT id, kind, payload, title FROM tasks WHERE pc_id=? AND status='pending' ORDER BY id LIMIT 10", (pc_id,)).fetchall()
+    for r in rows:
+        c.execute("UPDATE tasks SET status='sent', sent_at=? WHERE id=?", (now, r["id"]))
+    return [{"id": r["id"], "kind": r["kind"], "payload": r["payload"], "title": r["title"]} for r in rows]
 
 
 def drop_file_if_delivered(c, fid):
