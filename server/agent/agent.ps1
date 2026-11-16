@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.0'
+$AgentVersion = '1.1'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -92,9 +92,17 @@ function Get-Programs {
 
 $RdExe = "$env:ProgramFiles\RustDesk\rustdesk.exe"
 
-function Rd([string[]]$a) {
-    $o = & $RdExe @a 2>&1 | Out-String
-    return $o.Trim()
+# команда RustDesk с ограничением по времени (иначе может зависнуть навсегда)
+function Rd([string[]]$a, [int]$sec = 30) {
+    $o = "$Dir\tmp\rd.out"; $e = "$Dir\tmp\rd.err"
+    Remove-Item $o, $e -Force -ErrorAction SilentlyContinue
+    $p = Start-Process $RdExe -ArgumentList $a -NoNewWindow -PassThru -RedirectStandardOutput $o -RedirectStandardError $e
+    if (-not $p.WaitForExit($sec * 1000)) {
+        try { $p.Kill() } catch {}
+        Log "RustDesk $($a[0]): нет ответа за $sec с"
+        return ''
+    }
+    return ("$(Get-Content $o -Raw -ErrorAction SilentlyContinue)$(Get-Content $e -Raw -ErrorAction SilentlyContinue)").Trim()
 }
 
 function New-Pass {
@@ -108,9 +116,10 @@ function Ensure-RustDesk([bool]$newPass = $false) {
         Log 'RustDesk не найден — ставлю'
         $f = "$Dir\tmp\rustdesk.exe"
         Download '/dl/rustdesk.exe' $f
-        Start-Process $f -ArgumentList '--silent-install' -Wait
-        for ($i = 0; $i -lt 30 -and -not (Test-Path $RdExe); $i++) { Start-Sleep 2 }
-        Start-Sleep 5
+        # не ждём установщик: после установки он сам запускает RustDesk и «не завершается»
+        Start-Process $f -ArgumentList '--silent-install' | Out-Null
+        for ($i = 0; $i -lt 90 -and -not ((Test-Path $RdExe) -and (Get-Service RustDesk -ErrorAction SilentlyContinue)); $i++) { Start-Sleep 2 }
+        Start-Sleep 10
         if (-not (Test-Path $RdExe)) { Log 'RustDesk не установился'; return $false }
     }
     if ((Get-Service RustDesk -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service RustDesk -ErrorAction SilentlyContinue; Start-Sleep 3 }
@@ -223,11 +232,6 @@ $NeedPrograms = $true
 $interval = 20
 while ($true) {
     try {
-        $rdChanged = $false
-        if ($ForceRd -or ((Get-Date) - $lastRd).TotalMinutes -ge 30) {
-            try { $rdChanged = Ensure-RustDesk } catch { Log "RustDesk: $($_.Exception.Message)" }
-            $lastRd = Get-Date; $ForceRd = $false
-        }
         $rep = @{ info = Get-Info }
         if ($cfg.rd_id) { $rep.rd_id = $cfg.rd_id }
         if ($cfg.rd_pass) { $rep.rd_pass = $cfg.rd_pass }
@@ -237,6 +241,11 @@ while ($true) {
         if ($resp.interval) { $interval = [int]$resp.interval }
         foreach ($t in @($resp.tasks)) { if ($t) { Log "задание $($t.id): $($t.title)"; try { Start-Task $t } catch { Send-Result $t.id $false "Ошибка: $($_.Exception.Message)" 1 } } }
         Check-Running
+        # RustDesk — после отчёта, чтобы ПК сразу был виден в панели
+        if ($ForceRd -or ((Get-Date) - $lastRd).TotalMinutes -ge 30) {
+            $ForceRd = $false; $lastRd = Get-Date
+            try { Ensure-RustDesk | Out-Null } catch { Log "RustDesk: $($_.Exception.Message)" }
+        }
         if ($resp.agent_version -and $resp.agent_version -ne $AgentVersion -and $Running.Count -eq 0) {
             # самообновление агента: новая версия с панели, задача Windows перезапустит через ≤5 минут
             $wc = New-Object Net.WebClient; $wc.Encoding = [Text.Encoding]::UTF8

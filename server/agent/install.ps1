@@ -21,6 +21,11 @@ if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
 [Net.ServicePointManager]::ServerCertificateValidationCallback = { param($a, $c) $c.GetCertHashString() -eq $Thumb }
 
 Say 'Агент офиса: установка…' Cyan
+# если агент уже стоит — остановить старый (в т.ч. зависший) и запущенный им установщик RustDesk
+Stop-ScheduledTask -TaskName 'OfficeAgent' -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    ($_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*OfficeAgent\agent.ps1*') -or ($_.ExecutablePath -like '*\OfficeAgent\tmp\*')
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Force -Path $Dir, "$Dir\tmp" | Out-Null
 # папка агента — только система и администраторы; tmp — ещё и пользователи (для команд в их сеансе)
 # группы по SID — имена зависят от языка Windows («Администраторы», «Пользователи»)

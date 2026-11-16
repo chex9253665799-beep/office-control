@@ -544,9 +544,20 @@ def cleanup_loop():
             c.execute("DELETE FROM log WHERE ts < ?", (int(now) - 90 * 86400,))
 
 
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # обрывы соединений и ошибки TLS от браузера (недоверенный сертификат и т.п.) — не ошибка панели
+        e = sys.exc_info()[1]
+        if isinstance(e, (ssl.SSLError, ConnectionError, TimeoutError, OSError)):
+            return
+        super().handle_error(request, client_address)
+
+
 def main():
     init_db()
-    srv = ThreadingHTTPServer(("0.0.0.0", int(CFG["port"])), H)
+    srv = Server(("0.0.0.0", int(CFG["port"])), H)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(os.path.join(HOME, "cert.pem"), os.path.join(HOME, "key.pem"))
