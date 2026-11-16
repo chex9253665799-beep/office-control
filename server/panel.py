@@ -575,7 +575,7 @@ class H(BaseHTTPRequestHandler):
             tasks = take_tasks(c, pc["id"], now)
         need_programs = d.get("programs") is None and (now - (pc["programs_at"] or 0)) > 6 * 3600
         return self.send(200, {"tasks": tasks, "need_programs": need_programs, "interval": 20, "agent_version": AGENT_VERSION,
-                               "client": pc["client"] or None})
+                               "client": pc["client"] or None, "most_ver": most_version()})
 
     def a_result(self, pc):
         d = self.json_body()
@@ -866,6 +866,15 @@ def rd_id_from_hbbs(guid, since=0):
         return str(r[0]) if r and re.fullmatch(r"\d{6,12}", str(r[0])) else ""
     except sqlite3.Error:
         return ""
+
+
+def most_version():
+    """Метка сборки «Моста» на сервере (размер и время файла) — агенты по ней понимают, что пора обновиться."""
+    try:
+        st = os.stat(os.path.join(FILES, "most.exe"))
+        return f"{st.st_size}-{int(st.st_mtime)}"
+    except OSError:
+        return None
 
 
 def read_rd_key():

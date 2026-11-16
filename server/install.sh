@@ -72,8 +72,12 @@ fi
 # «Мост» — наша сборка (если уже собрана): github.com/chex9253665799-beep/most, релиз most-latest
 if curl -fsSL --max-time 300 -o "$HOME_DIR/files/most.exe.new" "https://github.com/chex9253665799-beep/most/releases/download/most-latest/most.exe" 2>/dev/null \
    && [ "$(stat -c %s "$HOME_DIR/files/most.exe.new")" -gt 1000000 ]; then
-  mv -f "$HOME_DIR/files/most.exe.new" "$HOME_DIR/files/most.exe"
-  say "     «Мост» для ПК офиса загружен"
+  if cmp -s "$HOME_DIR/files/most.exe.new" "$HOME_DIR/files/most.exe"; then
+    rm -f "$HOME_DIR/files/most.exe.new"     # та же сборка — не трогаем (по времени файла агенты решают, обновляться ли)
+  else
+    mv -f "$HOME_DIR/files/most.exe.new" "$HOME_DIR/files/most.exe"
+    say "     «Мост» для ПК офиса: новая сборка загружена"
+  fi
 else
   rm -f "$HOME_DIR/files/most.exe.new"
 fi

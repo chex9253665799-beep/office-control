@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.7'
+$AgentVersion = '1.8'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -95,7 +95,8 @@ function Get-Programs {
 # «Мост» — наша сборка RustDesk: сервер и ключ вшиты, имя программы «Мост»
 $Clients = @{
     rustdesk = @{ title = 'RustDesk'; dir = "$env:ProgramFiles\RustDesk"; exe = 'rustdesk.exe'; svc = 'RustDesk'; proc = 'rustdesk'; cfgName = 'RustDesk'; dl = '/dl/rustdesk.exe'; builtin = $false }
-    most     = @{ title = 'Мост'; dir = "$env:ProgramFiles\Мост"; exe = 'Мост.exe'; svc = 'Мост'; proc = 'Мост'; cfgName = 'Мост'; dl = '/dl/most.exe'; builtin = $true }
+    # внутреннее имя «Моста» — латиницей (папка, служба); «Мост» — только в окне и текстах
+    most     = @{ title = 'Мост'; dir = "$env:ProgramFiles\Most"; exe = 'Most.exe'; svc = 'Most'; proc = 'Most'; cfgName = 'Most'; dl = '/dl/most.exe'; builtin = $true }
 }
 
 # какая программа сейчас используется (выбирается в панели; по умолчанию RustDesk)
@@ -106,7 +107,7 @@ function Use-Client([string]$name) {
     $script:C = $c
     # exe: «Мост.exe» (по имени программы) или most.exe (как в сборке)
     $script:RdExe = Join-Path $c.dir $c.exe
-    if ($name -eq 'most' -and -not (Test-Path $script:RdExe) -and (Test-Path (Join-Path $c.dir 'most.exe'))) { $script:RdExe = Join-Path $c.dir 'most.exe' }
+
     $script:RdCfgDir = "$env:windir\ServiceProfiles\LocalService\AppData\Roaming\$($c.cfgName)\config"
 }
 Use-Client $(if ($cfg.client) { $cfg.client } else { 'rustdesk' })
@@ -365,6 +366,14 @@ while ($true) {
         $resp = Api '/a/report' $rep
         $script:NeedPrograms = [bool]$resp.need_programs
         if ($resp.client) { Switch-Client ([string]$resp.client) }
+        # на сервере новая сборка «Моста» — обновить (установщик ставит поверх, ID и настройки сохраняются)
+        if ($script:Client -eq 'most' -and $resp.most_ver -and (Test-Path $script:RdExe) -and $cfg.most_ver -and $cfg.most_ver -ne $resp.most_ver) {
+            Log "новая сборка «Моста» ($($resp.most_ver)) — обновляю"
+            if (Install-Client) { $script:ForceRd = $true }
+        }
+        if ($script:Client -eq 'most' -and $resp.most_ver -and (Test-Path $script:RdExe) -and $cfg.most_ver -ne $resp.most_ver) {
+            $cfg | Add-Member -NotePropertyName most_ver -NotePropertyValue ([string]$resp.most_ver) -Force; Save-Cfg
+        }
         if ($resp.interval) { $interval = [int]$resp.interval }
         foreach ($t in @($resp.tasks)) { if ($t) { Log "задание $($t.id): $($t.title)"; try { Start-Task $t } catch { Send-Result $t.id $false "Ошибка: $($_.Exception.Message)" 1 } } }
         Check-Running
