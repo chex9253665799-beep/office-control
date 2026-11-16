@@ -381,17 +381,20 @@ class H(BaseHTTPRequestHandler):
 
     # --- доступ администратора
     def admin(self):
-        ck = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
-        t = ck.get("oc") and ck["oc"].value
-        s = SESSIONS.get(t or "")
+        t = self.session_token()
+        s = SESSIONS.get(t)
         if s and s["exp"] > time.time():
             s["exp"] = time.time() + 12 * 3600
             return s
         return None
 
     def session_token(self):
-        ck = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
-        return ck["oc"].value if ck.get("oc") else ""
+        # в браузере может остаться старая метка oc (с другим путём) — берём ту, что действует
+        vals = re.findall(r"(?:^|;)\s*oc=([^;\s]+)", self.headers.get("Cookie", ""))
+        for v in vals:
+            if v in SESSIONS:
+                return v
+        return vals[0] if vals else ""
 
     # --- доступ агента
     def agent(self):
@@ -630,9 +633,7 @@ class H(BaseHTTPRequestHandler):
     def api(self, method, path, q):
         now = int(time.time())
         if path == "/api/logout":
-            ck = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
-            if ck.get("oc"):
-                SESSIONS.pop(ck["oc"].value, None)
+            SESSIONS.pop(self.session_token(), None)
             path = ("/" + CFG["admin_path"] + "/") if CFG.get("admin_path") else "/"
             return self.send(200, {"ok": True}, headers={"Set-Cookie": f"oc=; Path={path}; Max-Age=0"})
 
