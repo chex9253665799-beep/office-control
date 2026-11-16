@@ -16,7 +16,7 @@ on:
         description: "Что сделать"
         type: choice
         default: status
-        options: [install, status, logs, restart]
+        options: [install, status, logs, restart, pcs]
 
 permissions:
   contents: read
@@ -73,6 +73,16 @@ jobs:
               ;;
             logs)
               $SSH "$USR@$HOST" "$SUDO journalctl -u office-panel -u office-hbbs -u office-hbbr -n 120 --no-pager"
+              ;;
+            pcs)
+              # список ПК без паролей и ключей
+              $SSH "$USR@$HOST" "$SUDO python3 -c \"
+          import sqlite3, time, json
+          c = sqlite3.connect('/opt/office/office.db'); c.row_factory = sqlite3.Row; now = int(time.time())
+          for r in c.execute('SELECT * FROM pcs'):
+              i = json.loads(r['info'] or '{}')
+              print(r['hostname'], '| был', now - (r['last_seen'] or 0), 'с назад | info полей:', len(i), '| программ:', len(json.loads(r['programs'] or '[]')), '| rd_id:', 'есть' if r['rd_id'] else 'нет', '| пароль rd:', 'есть' if r['rd_pass'] else 'нет', '| агент', i.get('agent'))
+          \"; ls -la /opt/office"
               ;;
             restart)
               $SSH "$USR@$HOST" "$SUDO systemctl restart office-hbbs office-hbbr office-panel && sleep 3 && systemctl is-active office-hbbs office-hbbr office-panel"
