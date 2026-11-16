@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.3'
+$AgentVersion = '1.4'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -319,6 +319,8 @@ while ($true) {
             if ($new -match 'AgentVersion') {
                 [IO.File]::WriteAllText("$Dir\agent.ps1", $new, (New-Object Text.UTF8Encoding $true))
                 Log "обновлён до $($resp.agent_version) — перезапуск"
+                # перезапуск сразу, а не через 5 минут по расписанию: отдельный процесс подождёт выхода и запустит задачу
+                Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep 5; Start-ScheduledTask -TaskName OfficeAgent"' | Out-Null
                 $mutex.ReleaseMutex(); exit
             }
         }
