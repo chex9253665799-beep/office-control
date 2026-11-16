@@ -62,6 +62,12 @@ def init_db():
         CREATE TABLE IF NOT EXISTS log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, who TEXT, text TEXT);
         CREATE TABLE IF NOT EXISTS files(id TEXT PRIMARY KEY, name TEXT, size INTEGER, created INTEGER);
         """)
+        # новые колонки (база могла быть создана раньше)
+        have = {r[1] for r in c.execute("PRAGMA table_info(pcs)")}
+        if "client" not in have:      # программа удалённого доступа: '' / 'rustdesk' / 'most'
+            c.execute("ALTER TABLE pcs ADD COLUMN client TEXT DEFAULT ''")
+        if "rd_since" not in have:    # с какого времени искать ID в hbbs (после смены программы)
+            c.execute("ALTER TABLE pcs ADD COLUMN rd_since INTEGER DEFAULT 0")
 
 
 def log(who, text):
@@ -472,11 +478,12 @@ class H(BaseHTTPRequestHandler):
                    .replace("__RD_KEY__", read_rd_key()))
             return self.send(200, txt, "text/plain; charset=utf-8")
 
-        if path == "/dl/rustdesk.exe":
+        if path in ("/dl/rustdesk.exe", "/dl/most.exe"):
             sess = in_admin and self.admin()
             if not (self.agent() or hmac.compare_digest((q.get("t") or [""])[0], CFG["enroll_token"]) or (sess and sess["full"])):
                 return self.not_found()
-            return self.send_file(os.path.join(FILES, "rustdesk.exe"), "rustdesk.exe")
+            name = path.rsplit("/", 1)[1]
+            return self.send_file(os.path.join(FILES, name), name)
 
         # ---------- агент
         if path == "/a/enroll" and method == "POST":
@@ -551,7 +558,12 @@ class H(BaseHTTPRequestHandler):
         if d.get("programs") is not None:
             sets += ["programs=?", "programs_at=?"]
             vals += [json.dumps(d["programs"], ensure_ascii=False), now]
-        rd_id = str(d.get("rd_id") or "")[:20] or (pc["rd_id"] if pc["rd_id"] else rd_id_from_hbbs(pc["guid"]))
+        # ПК ещё не перешёл на программу, выбранную в панели, — его прежние ID и пароль не принимаем
+        switching = bool(pc["client"]) and (info.get("client") or "rustdesk") != pc["client"]
+        if switching:
+            d.pop("rd_id", None)
+            d.pop("rd_pass", None)
+        rd_id = str(d.get("rd_id") or "")[:20] or (pc["rd_id"] if pc["rd_id"] or switching else rd_id_from_hbbs(pc["guid"], pc["rd_since"]))
         if rd_id and rd_id != pc["rd_id"]:
             sets.append("rd_id=?"); vals.append(rd_id)
         if d.get("rd_pass"):
@@ -560,7 +572,8 @@ class H(BaseHTTPRequestHandler):
             c.execute(f"UPDATE pcs SET {', '.join(sets)} WHERE id=?", vals + [pc["id"]])
             tasks = take_tasks(c, pc["id"], now)
         need_programs = d.get("programs") is None and (now - (pc["programs_at"] or 0)) > 6 * 3600
-        return self.send(200, {"tasks": tasks, "need_programs": need_programs, "interval": 20, "agent_version": AGENT_VERSION})
+        return self.send(200, {"tasks": tasks, "need_programs": need_programs, "interval": 20, "agent_version": AGENT_VERSION,
+                               "client": pc["client"] or None})
 
     def a_result(self, pc):
         d = self.json_body()
@@ -661,6 +674,7 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {
                 "version": VERSION, "panel": CFG["public_url"], "rd_host": CFG["rd_host"], "rd_key": read_rd_key(),
                 "install": install_cmd(), "scripts": SCRIPTS,
+                "has_most": os.path.isfile(os.path.join(FILES, "most.exe")),
             })
 
         if path == "/api/pcs":
@@ -673,6 +687,21 @@ class H(BaseHTTPRequestHandler):
                 out.append({**{k: r[k] for k in r.keys() if k != "info"}, "info": info,
                             "online": now - (r["last_seen"] or 0) < ONLINE_SEC, "pending": pend.get(r["id"], 0)})
             return self.send(200, out)
+
+        m = re.match(r"^/api/pc/([0-9a-f]{16})/client$", path)
+        if m and method == "POST":   # перевести ПК на другую программу удалённого доступа
+            cl = str(self.json_body().get("client", ""))
+            if cl not in ("most", "rustdesk"):
+                raise ValueError("Неизвестная программа")
+            if cl == "most" and not os.path.isfile(os.path.join(FILES, "most.exe")):
+                raise ValueError("«Мост» ещё не загружен на сервер")
+            with LOCK, db() as c:
+                r = c.execute("SELECT hostname, alias FROM pcs WHERE id=?", (m.group(1),)).fetchone()
+                if not r:
+                    raise ValueError("Нет такого ПК")
+                c.execute("UPDATE pcs SET client=?, rd_id='', rd_pass='', rd_since=? WHERE id=?", (cl, now, m.group(1)))
+            log("админ", f"{r['alias'] or r['hostname']}: переход на {'«Мост»' if cl == 'most' else 'RustDesk'}")
+            return self.send(200, {"ok": True})
 
         m = re.match(r"^/api/pc/([0-9a-f]{16})$", path)
         if m:
@@ -819,14 +848,17 @@ def task_file_id(t):
         return None
 
 
-def rd_id_from_hbbs(guid):
-    """ID RustDesk этого ПК — из базы нашего сервера RustDesk (hbbs): RustDesk регистрируется под MachineGuid Windows."""
+def rd_id_from_hbbs(guid, since=0):
+    """ID программы на этом ПК — из базы нашего сервера (hbbs): RustDesk/«Мост» регистрируются под MachineGuid Windows.
+    since — после смены программы берём только устройства, появившиеся позже."""
     if not guid:
         return ""
     try:
         h = sqlite3.connect(f"file:{os.path.join(HOME, 'rustdesk', 'db_v2.sqlite3')}?mode=ro", uri=True, timeout=5)
         try:
-            r = h.execute("SELECT id FROM peer WHERE uuid=? OR uuid=? ORDER BY created_at DESC LIMIT 1", (guid.encode(), guid)).fetchone()
+            after = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(since or 0))
+            r = h.execute("SELECT id FROM peer WHERE (uuid=? OR uuid=?) AND created_at >= ? ORDER BY created_at DESC LIMIT 1",
+                          (guid.encode(), guid, after)).fetchone()
         finally:
             h.close()
         return str(r[0]) if r and re.fullmatch(r"\d{6,12}", str(r[0])) else ""

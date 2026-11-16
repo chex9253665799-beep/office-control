@@ -69,6 +69,15 @@ if [ ! -s "$HOME_DIR/files/rustdesk.exe" ] || [ "$(cat "$HOME_DIR/files/.client"
   echo "$RD_CLIENT_VER" > "$HOME_DIR/files/.client"
 fi
 
+# «Мост» — наша сборка (если уже собрана): github.com/chex9253665799-beep/most, релиз most-latest
+if curl -fsSL --max-time 300 -o "$HOME_DIR/files/most.exe.new" "https://github.com/chex9253665799-beep/most/releases/download/most-latest/most.exe" 2>/dev/null \
+   && [ "$(stat -c %s "$HOME_DIR/files/most.exe.new")" -gt 1000000 ]; then
+  mv -f "$HOME_DIR/files/most.exe.new" "$HOME_DIR/files/most.exe"
+  say "     «Мост» для ПК офиса загружен"
+else
+  rm -f "$HOME_DIR/files/most.exe.new"
+fi
+
 say "4/7  Сертификат и настройки"
 if [ ! -f "$HOME_DIR/cert.pem" ]; then
   if [[ "$HOST" =~ ^[0-9.]+$ ]]; then SAN="IP:$HOST"; else SAN="DNS:$HOST"; fi

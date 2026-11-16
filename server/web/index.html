@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Офис — панель управления</title>
+<title>Мост — панель управления</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20256%20256%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22m1%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%237c3aed%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23ec4899%22/%3E%3C/linearGradient%3E%0A%20%20%3C/defs%3E%0A%20%20%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%22240%22%20height%3D%22240%22%20rx%3D%2256%22%20fill%3D%22url%28%23m1%29%22/%3E%0A%20%20%3Crect%20x%3D%2234%22%20y%3D%22128%22%20width%3D%2264%22%20height%3D%2248%22%20rx%3D%2210%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2211%22/%3E%0A%20%20%3Crect%20x%3D%22158%22%20y%3D%22128%22%20width%3D%2264%22%20height%3D%2248%22%20rx%3D%2210%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2211%22/%3E%0A%20%20%3Cpath%20d%3D%22M66%20120%20C%2080%2050%2C%20176%2050%2C%20190%20120%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2212%22%20stroke-linecap%3D%22round%22/%3E%0A%20%20%3Ccircle%20cx%3D%22128%22%20cy%3D%2268%22%20r%3D%2212%22%20fill%3D%22%23fde68a%22/%3E%0A%20%20%3Cpath%20d%3D%22M66%20196%20h124%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2210%22%20stroke-linecap%3D%22round%22%20opacity%3D%22.5%22/%3E%0A%3C/svg%3E">
 <style>
 :root{--bg:#0d1117;--panel:#151b26;--panel2:#1c2433;--line:#273043;--text:#e6ebf4;--mute:#8b96ab;--acc:#3b82f6;--acc2:#2563eb;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444}
 *{box-sizing:border-box}
@@ -69,7 +70,7 @@ pre{background:#0b0f16;border:1px solid var(--line);border-radius:8px;padding:9p
 </head>
 <body>
 <div id="login" class="login" style="display:none">
-  <h1>🖥 Панель офиса</h1>
+  <h1><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20256%20256%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22m1%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%237c3aed%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23ec4899%22/%3E%3C/linearGradient%3E%0A%20%20%3C/defs%3E%0A%20%20%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%22240%22%20height%3D%22240%22%20rx%3D%2256%22%20fill%3D%22url%28%23m1%29%22/%3E%0A%20%20%3Crect%20x%3D%2234%22%20y%3D%22128%22%20width%3D%2264%22%20height%3D%2248%22%20rx%3D%2210%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2211%22/%3E%0A%20%20%3Crect%20x%3D%22158%22%20y%3D%22128%22%20width%3D%2264%22%20height%3D%2248%22%20rx%3D%2210%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2211%22/%3E%0A%20%20%3Cpath%20d%3D%22M66%20120%20C%2080%2050%2C%20176%2050%2C%20190%20120%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2212%22%20stroke-linecap%3D%22round%22/%3E%0A%20%20%3Ccircle%20cx%3D%22128%22%20cy%3D%2268%22%20r%3D%2212%22%20fill%3D%22%23fde68a%22/%3E%0A%20%20%3Cpath%20d%3D%22M66%20196%20h124%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2210%22%20stroke-linecap%3D%22round%22%20opacity%3D%22.5%22/%3E%0A%3C/svg%3E" alt="" style="width:26px;height:26px;vertical-align:-6px;margin-right:6px">Мост</h1>
   <input id="pw" type="password" placeholder="Пароль администратора" autocomplete="current-password" autofocus>
   <input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Код из приложения (6 цифр)">
   <div class="sub" style="margin:-6px 0 10px;font-size:12px">При первом входе код не нужен — панель предложит его настроить.</div>
@@ -95,7 +96,7 @@ pre{background:#0b0f16;border:1px solid var(--line);border-radius:8px;padding:9p
 
 <div id="app" style="display:none">
 <header>
-  <h1>🖥 Панель офиса</h1><span class="count" id="count"></span>
+  <h1><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20256%20256%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22m1%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%237c3aed%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23ec4899%22/%3E%3C/linearGradient%3E%0A%20%20%3C/defs%3E%0A%20%20%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%22240%22%20height%3D%22240%22%20rx%3D%2256%22%20fill%3D%22url%28%23m1%29%22/%3E%0A%20%20%3Crect%20x%3D%2234%22%20y%3D%22128%22%20width%3D%2264%22%20height%3D%2248%22%20rx%3D%2210%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2211%22/%3E%0A%20%20%3Crect%20x%3D%22158%22%20y%3D%22128%22%20width%3D%2264%22%20height%3D%2248%22%20rx%3D%2210%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2211%22/%3E%0A%20%20%3Cpath%20d%3D%22M66%20120%20C%2080%2050%2C%20176%2050%2C%20190%20120%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2212%22%20stroke-linecap%3D%22round%22/%3E%0A%20%20%3Ccircle%20cx%3D%22128%22%20cy%3D%2268%22%20r%3D%2212%22%20fill%3D%22%23fde68a%22/%3E%0A%20%20%3Cpath%20d%3D%22M66%20196%20h124%22%20stroke%3D%22%23fff%22%20stroke-width%3D%2210%22%20stroke-linecap%3D%22round%22%20opacity%3D%22.5%22/%3E%0A%3C/svg%3E" alt="" style="width:26px;height:26px;vertical-align:-6px;margin-right:6px">Мост</h1><span class="count" id="count"></span>
   <span class="sp"></span>
   <button onclick="showAdd()">＋ Добавить ПК</button>
   <button onclick="showMy()">Подключаться с моего ПК</button>
@@ -217,7 +218,7 @@ function render(){
     const i=p.info||{}, c=(i.disks||[]).find(d=>d.name==='C:')||(i.disks||[])[0];
     const ram=i.ram_gb?Math.round(100*(i.ram_gb-i.ram_free_gb)/i.ram_gb):0;
     const disk=c&&c.size_gb?Math.round(100*(c.size_gb-c.free_gb)/c.size_gb):0;
-    const conn=p.rd_id?`<div class="btns"><a class="btn" href="#" onclick="return rdOpen('${p.id}','connection/new',this)" title="Открыть экран этого ПК">Экран</a><a class="btn g" href="#" onclick="return rdOpen('${p.id}','file-transfer',this)">Файлы</a></div><div class="sub">ID ${esc(p.rd_id)}</div>`:'<span class="sub">RustDesk ставится…</span>';
+    const conn=p.rd_id?`<div class="btns"><a class="btn" href="#" onclick="return rdOpen('${p.id}','connection/new',this)" title="Открыть экран этого ПК">Экран</a><a class="btn g" href="#" onclick="return rdOpen('${p.id}','file-transfer',this)">Файлы</a></div><div class="sub">ID ${esc(p.rd_id)}</div>`:`<span class="sub">${(p.client==='most')?'«Мост» ставится…':'RustDesk ставится…'}</span>`;
     return `<tr class="${p.online?'':'off'}">
       <td><input type="checkbox" ${SEL.has(p.id)?'checked':''} onchange="sel('${p.id}',this.checked)"></td>
       <td><span class="dot ${p.online?'on':''}"></span><span class="name" onclick="openPc('${p.id}')">${esc(p.alias||p.hostname)}</span>
@@ -263,7 +264,10 @@ async function sendFile(){
   }catch(e){toast('⚠ '+e.message)}
 }
 
-// «Экран»/«Файлы»: агент ставит новый одноразовый пароль RustDesk, затем открываем RustDesk уже с ним
+// «Экран»/«Файлы»: агент ставит новый одноразовый пароль, затем открываем программу на этом компьютере уже с ним.
+// Какая программа стоит у администратора — запоминается в браузере (Подключаться с моего ПК).
+function myScheme(){try{return localStorage.getItem('scheme')||'rustdesk'}catch(e){return 'rustdesk'}}
+function setScheme(v){try{localStorage.setItem('scheme',v)}catch(e){}showMy()}
 let RD_BUSY=false;
 function rdOpen(id,mode,el){
   if(RD_BUSY)return false;RD_BUSY=true;
@@ -279,7 +283,7 @@ function rdOpen(id,mode,el){
     try{
       const p=await api('api/pc/'+id);
       if(note)toast('⚠ '+note);
-      location.href=`rustdesk://${mode}/${encodeURIComponent(p.rd_id)}?password=${encodeURIComponent(p.rd_pass||'')}`;
+      location.href=`${myScheme()}://${mode}/${encodeURIComponent(p.rd_id)}?password=${encodeURIComponent(p.rd_pass||'')}`;
     }catch(e){toast('⚠ '+e.message)}
     finally{el.textContent=old;RD_BUSY=false}
   })();
@@ -313,7 +317,9 @@ async function openPc(id,quiet){
       <div>Диски</div><div>${(i.disks||[]).map(d=>`${esc(d.name)} свободно ${d.free_gb} из ${d.size_gb} ГБ`).join('<br>')}</div>
       <div>Сеть</div><div>${esc((i.ips||[]).join(', '))} · внешний ${esc(p.ip)} · MAC ${esc(i.mac||'—')}</div>
       <div>Антивирус</div><div>${esc((i.antivirus||[]).join(', ')||'—')}</div>
-      <div>RustDesk</div><div>${p.rd_id?`ID <b>${esc(p.rd_id)}</b> · пароль <code>${esc(p.rd_pass||'—')}</code>`:'ещё не настроен'}</div>
+      <div>Программа</div><div>${(i.client==='most')?'«Мост»':'RustDesk'}${p.client&&p.client!==(i.client||'rustdesk')?` <span class="sub">→ переходит на ${p.client==='most'?'«Мост»':'RustDesk'}…</span>`:''}
+        ${INFO.has_most&&(p.client||i.client||'rustdesk')!=='most'?` <button class="sm" onclick="toMost('${p.id}')">Перевести на «Мост»</button>`:''}</div>
+      <div>Доступ</div><div>${p.rd_id?`ID <b>${esc(p.rd_id)}</b> · пароль <code>${esc(p.rd_pass||'—')}</code>`:'ещё не настроен'}</div>
       <div>Агент</div><div>${esc(i.agent||'—')} · в панели с ${dt(p.first_seen)}</div>
     </div>
     ${(i.log&&i.log.length)?`<details ${p.rd_id?'':'open'}><summary class="sub" style="cursor:pointer;margin-top:10px">Журнал агента</summary><pre>${esc([].concat(i.log).join('\n'))}</pre></details>`:''}
@@ -349,15 +355,21 @@ function showAdd(){
   Строка содержит ключ подключения к твоей панели — не публикуй её.</p>`);
 }
 function showMy(){
-  modal(`<h3 style="margin-top:0">Подключаться с моего ПК или телефона</h3>
-  <p>Кнопки «Экран» и «Файлы» открывают программу <b>RustDesk</b> на твоём компьютере. Её нужно один раз поставить и направить на твой сервер:</p>
+  const sc=myScheme();
+  modal(`<h3 style="margin-top:0">Подключаться с моего ПК</h3>
+  <p>Кнопки «Экран» и «Файлы» открывают программу на <b>этом</b> компьютере. Какая у тебя стоит?</p>
+  <div class="btns" style="margin-bottom:12px">
+    <button class="${sc==='most'?'pri':''}" onclick="setScheme('most')">«Мост»</button>
+    <button class="${sc==='rustdesk'?'pri':''}" onclick="setScheme('rustdesk')">RustDesk</button>
+  </div>
+  ${sc==='most'?`<p>${INFO.has_most?`Скачай и установи «Мост»: <a href="dl/most.exe" style="color:#93c5fd">most.exe</a>. Настраивать ничего не нужно — наш сервер уже внутри.`:'«Мост» ещё не загружен на сервер.'}</p>
+  <p class="sub">Если этот компьютер есть в панели, проще нажать у него «Перевести на «Мост»» — агент всё поставит сам.</p>`:`
   <ol>
-   <li>Скачай RustDesk: <a href="https://rustdesk.com/download" target="_blank" style="color:#93c5fd">rustdesk.com/download</a> (или с панели: <a href="dl/rustdesk.exe" style="color:#93c5fd">rustdesk.exe</a>) и установи.</li>
+   <li>Скачай RustDesk: <a href="dl/rustdesk.exe" style="color:#93c5fd">rustdesk.exe</a> и установи.</li>
    <li>В RustDesk: ⋮ рядом с ID → <b>Сеть</b> → <b>Сервер ID/ретрансляции</b>, заполни:</li></ol>
   <div class="kv"><div>ID-сервер</div><div class="copy"><pre id="h1">${esc(INFO.rd_host)}</pre>${copyBtn('h1')}</div>
   <div>Сервер ретрансляции</div><div class="copy"><pre id="h2">${esc(INFO.rd_host)}</pre>${copyBtn('h2')}</div>
-  <div>Ключ</div><div class="copy"><pre id="h3">${esc(INFO.rd_key||'ключ появится после первого запуска сервера RustDesk')}</pre>${copyBtn('h3')}</div></div>
-  <p class="sub">На телефоне (RustDesk для Android) — то же самое: Настройки → Сервер ID/ретрансляции. После этого «Экран» в панели открывает нужный ПК сразу, без ввода пароля.</p>`);
+  <div>Ключ</div><div class="copy"><pre id="h3">${esc(INFO.rd_key||'ключ появится после первого запуска сервера')}</pre>${copyBtn('h3')}</div></div>`}`);
 }
 async function showLog(){
   const l=await api('api/log');

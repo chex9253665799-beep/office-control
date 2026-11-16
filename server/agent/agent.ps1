@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.6'
+$AgentVersion = '1.7'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -78,7 +78,8 @@ function Get-Info {
         serial = $bios.SerialNumber
         antivirus = $av
         agent = $AgentVersion
-        rustdesk = [bool](Get-Service RustDesk -ErrorAction SilentlyContinue)
+        rustdesk = [bool](Get-Service $script:C.svc -ErrorAction SilentlyContinue)
+        client = $script:Client
         log = @(Get-Content "$Dir\agent.log" -Tail 12 -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })
     }
 }
@@ -89,21 +90,38 @@ function Get-Programs {
         Sort-Object DisplayName -Unique | ForEach-Object { @{ n = $_.DisplayName; v = $_.DisplayVersion; p = $_.Publisher } })
 }
 
-# ------------------------------------------------------------------ RustDesk со своим сервером
+# ------------------------------------------------------------------ программа удалённого доступа: «Мост» (наша) или RustDesk
 
-$RdExe = "$env:ProgramFiles\RustDesk\rustdesk.exe"
+# «Мост» — наша сборка RustDesk: сервер и ключ вшиты, имя программы «Мост»
+$Clients = @{
+    rustdesk = @{ title = 'RustDesk'; dir = "$env:ProgramFiles\RustDesk"; exe = 'rustdesk.exe'; svc = 'RustDesk'; proc = 'rustdesk'; cfgName = 'RustDesk'; dl = '/dl/rustdesk.exe'; builtin = $false }
+    most     = @{ title = 'Мост'; dir = "$env:ProgramFiles\Мост"; exe = 'Мост.exe'; svc = 'Мост'; proc = 'Мост'; cfgName = 'Мост'; dl = '/dl/most.exe'; builtin = $true }
+}
 
-# команда RustDesk с ограничением по времени (иначе может зависнуть навсегда).
+# какая программа сейчас используется (выбирается в панели; по умолчанию RustDesk)
+function Use-Client([string]$name) {
+    if (-not $Clients.ContainsKey($name)) { $name = 'rustdesk' }
+    $c = $Clients[$name]
+    $script:Client = $name
+    $script:C = $c
+    # exe: «Мост.exe» (по имени программы) или most.exe (как в сборке)
+    $script:RdExe = Join-Path $c.dir $c.exe
+    if ($name -eq 'most' -and -not (Test-Path $script:RdExe) -and (Test-Path (Join-Path $c.dir 'most.exe'))) { $script:RdExe = Join-Path $c.dir 'most.exe' }
+    $script:RdCfgDir = "$env:windir\ServiceProfiles\LocalService\AppData\Roaming\$($c.cfgName)\config"
+}
+Use-Client $(if ($cfg.client) { $cfg.client } else { 'rustdesk' })
+
+# команда программы с ограничением по времени (иначе может зависнуть навсегда).
 # Как в официальном скрипте RustDesk: из папки программы, вывод через конвейер.
-function Rd([string[]]$a, [int]$sec = 30) {
+function Rd([string[]]$a, [int]$sec = 30, [string]$exe = $script:RdExe) {
     $j = Start-Job -ScriptBlock {
         param($exe, $args2)
         Set-Location (Split-Path $exe)
         (& $exe @args2 | Out-String)
-    } -ArgumentList $RdExe, $a
+    } -ArgumentList $exe, $a
     if (-not (Wait-Job $j -Timeout $sec)) {
         Stop-Job $j -ErrorAction SilentlyContinue; Remove-Job $j -Force -ErrorAction SilentlyContinue
-        Log "RustDesk $($a[0]): нет ответа за $sec с"
+        Log "$($script:C.title) $($a[0]): нет ответа за $sec с"
         return ''
     }
     $o = Receive-Job $j -ErrorAction SilentlyContinue | Out-String
@@ -116,17 +134,13 @@ function New-Pass {
     -join (1..12 | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
 }
 
-# настройки службы RustDesk (служба работает от системы, её настройки — здесь)
-$RdCfgDir = "$env:windir\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
-
-# записать key = 'value' в файл настроек RustDesk (в раздел [section] или в начало, если раздела нет)
+# записать key = 'value' в файл настроек (в раздел [section] или в начало, если раздела нет)
 function Set-Toml([string]$file, [string]$section, [hashtable]$values) {
     New-Item -ItemType Directory -Force -Path (Split-Path $file) | Out-Null
     $lines = New-Object System.Collections.Generic.List[string]
     if (Test-Path $file) { foreach ($l in [IO.File]::ReadAllLines($file)) { $lines.Add($l) } }
     foreach ($k in $values.Keys) {
         $line = "$k = '$($values[$k])'"
-        # границы раздела
         $from = 0; $to = $lines.Count
         if ($section) {
             $h = $lines.IndexOf("[$section]")
@@ -143,14 +157,14 @@ function Set-Toml([string]$file, [string]$section, [hashtable]$values) {
     [IO.File]::WriteAllLines($file, $lines, (New-Object Text.UTF8Encoding $false))
 }
 
-# правка настроек RustDesk: только при остановленном RustDesk, иначе при выходе он перезапишет файл своими старыми настройками
+# правка настроек: только при остановленной программе, иначе при выходе она перезапишет файл своими старыми настройками
 function Edit-RdConfig([scriptblock]$edit) {
-    Stop-Service RustDesk -Force -ErrorAction SilentlyContinue
+    Stop-Service $script:C.svc -Force -ErrorAction SilentlyContinue
     Start-Sleep 2
-    Get-Process rustdesk -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process $script:C.proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep 2
     & $edit
-    Start-Service RustDesk -ErrorAction SilentlyContinue
+    Start-Service $script:C.svc -ErrorAction SilentlyContinue
     Start-Sleep 8
 }
 
@@ -160,45 +174,67 @@ function Get-TomlValue([string]$file, [string]$key) {
     if ($m) { return $m.Matches[0].Groups[1].Value } else { return '' }
 }
 
-# Новый постоянный пароль RustDesk. Возвращает пароль.
+# Новый постоянный пароль. Возвращает пароль.
 function Set-RdPassword {
     $p = New-Pass
     $res = Rd '--password', $p
     if ($res -notmatch 'Done') {
-        Log "RustDesk --password: '$res' — пишу пароль в файл"
-        Edit-RdConfig { Set-Toml "$RdCfgDir\RustDesk.toml" '' @{ 'password' = $p } }
+        Log "$($script:C.title) --password: '$res' — пишу пароль в файл"
+        Edit-RdConfig { Set-Toml "$script:RdCfgDir\$($script:C.cfgName).toml" '' @{ 'password' = $p } }
     }
     $cfg | Add-Member -NotePropertyName rd_pass -NotePropertyValue $p -Force
     Save-Cfg
-    Log 'пароль RustDesk задан'
+    Log "пароль $($script:C.title) задан"
     return $p
 }
 
-# Поставить RustDesk (если нет), направить на наш сервер, задать постоянный пароль. Возвращает $true, если что-то изменилось.
-function Ensure-RustDesk([bool]$newPass = $false) {
-    if (-not (Test-Path $RdExe)) {
-        Log 'RustDesk не найден — ставлю'
-        $f = "$Dir\tmp\rustdesk.exe"
-        Download '/dl/rustdesk.exe' $f
-        # не ждём установщик: после установки он сам запускает RustDesk и «не завершается»
-        Start-Process $f -ArgumentList '--silent-install' | Out-Null
-        for ($i = 0; $i -lt 90 -and -not ((Test-Path $RdExe) -and (Get-Service RustDesk -ErrorAction SilentlyContinue)); $i++) { Start-Sleep 2 }
-        Start-Sleep 10
-        if (-not (Test-Path $RdExe)) { Log 'RustDesk не установился'; return $false }
-        Log 'RustDesk установлен'
+function Install-Client {
+    Log "$($script:C.title) не найден — ставлю"
+    $f = "$Dir\tmp\$($script:Client)-setup.exe"
+    Download $script:C.dl $f
+    # не ждём установщик: после установки он сам запускает программу и «не завершается»
+    Start-Process $f -ArgumentList '--silent-install' | Out-Null
+    for ($i = 0; $i -lt 90; $i++) {
+        Use-Client $script:Client
+        if ((Test-Path $script:RdExe) -and (Get-Service $script:C.svc -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep 2
     }
-    $restart = $false
-    $cfg2 = "$RdCfgDir\RustDesk2.toml"
-    $cfg1 = "$RdCfgDir\RustDesk.toml"
+    Start-Sleep 10
+    Use-Client $script:Client
+    if (-not (Test-Path $script:RdExe)) { Log "$($script:C.title) не установился"; return $false }
+    Log "$($script:C.title) установлен"
+    return $true
+}
 
-    # 1) сервер офиса
-    if ((Get-TomlValue $cfg2 'custom-rendezvous-server') -ne '__RD_HOST__' -or (Get-TomlValue $cfg2 'key') -ne '__RD_KEY__') {
+# После перехода на «Мост» — убрать RustDesk
+function Remove-OldRustDesk {
+    $old = Join-Path $Clients.rustdesk.dir $Clients.rustdesk.exe
+    if (-not (Test-Path $old)) { return }
+    Log 'удаляю RustDesk (заменён «Мостом»)'
+    Rd '--uninstall' 120 $old | Out-Null
+    Start-Sleep 5
+    if (Test-Path $old) {
+        Stop-Service RustDesk -Force -ErrorAction SilentlyContinue
+        & sc.exe delete RustDesk | Out-Null
+        Get-Process rustdesk -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Remove-Item $Clients.rustdesk.dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Log $(if (Test-Path $old) { 'RustDesk удалить не удалось' } else { 'RustDesk удалён' })
+}
+
+# Поставить программу (если нет), направить на наш сервер, задать постоянный пароль. Возвращает $true, если что-то изменилось.
+function Ensure-RustDesk([bool]$newPass = $false) {
+    if (-not (Test-Path $script:RdExe)) { if (-not (Install-Client)) { return $false } }
+    $cfg2 = "$script:RdCfgDir\$($script:C.cfgName)2.toml"
+    $cfg1 = "$script:RdCfgDir\$($script:C.cfgName).toml"
+
+    # 1) сервер офиса (у «Моста» он вшит при сборке)
+    if (-not $script:C.builtin -and ((Get-TomlValue $cfg2 'custom-rendezvous-server') -ne '__RD_HOST__' -or (Get-TomlValue $cfg2 'key') -ne '__RD_KEY__')) {
         $r = Rd '--option', 'custom-rendezvous-server', '__RD_HOST__'
         Rd '--option', 'relay-server', '__RD_HOST__' | Out-Null
         Rd '--option', 'key', '__RD_KEY__' | Out-Null
         Start-Sleep 2
         if ((Get-TomlValue $cfg2 'custom-rendezvous-server') -ne '__RD_HOST__') {
-            # команда не сработала — пишем настройки службы напрямую
             Log "RustDesk --option не сработал ($r) — пишу настройки в файл"
             Edit-RdConfig { Set-Toml $cfg2 'options' @{ 'custom-rendezvous-server' = '__RD_HOST__'; 'relay-server' = '__RD_HOST__'; 'key' = '__RD_KEY__' } }
         }
@@ -208,20 +244,32 @@ function Ensure-RustDesk([bool]$newPass = $false) {
     # 2) постоянный пароль
     $changed = $false
     if ($newPass -or -not $cfg.rd_pass) { Set-RdPassword | Out-Null; $changed = $true }
-
-    if ($restart) { Restart-Service RustDesk -Force -ErrorAction SilentlyContinue; Start-Sleep 8 }
-    elseif ((Get-Service RustDesk -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service RustDesk -ErrorAction SilentlyContinue; Start-Sleep 5 }
+    if ((Get-Service $script:C.svc -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service $script:C.svc -ErrorAction SilentlyContinue; Start-Sleep 5 }
 
     # 3) ID
     $id = (Rd '--get-id') -replace '\s', ''
     if ($id -notmatch '^\d{6,}$') {
         $id = Get-TomlValue $cfg1 'id'
-        if ($id -notmatch '^\d{6,}$') { Log 'RustDesk: ID пока нет'; $script:RdRetry = $true }
+        if ($id -notmatch '^\d{6,}$') { Log "$($script:C.title): ID пока нет"; $script:RdRetry = $true }
     }
     if ($id -match '^\d{6,}$' -and $id -ne $cfg.rd_id) {
-        $cfg | Add-Member -NotePropertyName rd_id -NotePropertyValue $id -Force; Save-Cfg; $changed = $true; Log "RustDesk ID $id"
+        $cfg | Add-Member -NotePropertyName rd_id -NotePropertyValue $id -Force; Save-Cfg; $changed = $true; Log "$($script:C.title) ID $id"
     }
+    # 4) перешли на «Мост» и он работает — RustDesk больше не нужен
+    if ($script:Client -eq 'most' -and $id -match '^\d{6,}$') { Remove-OldRustDesk }
     return $changed
+}
+
+# Панель велела сменить программу (RustDesk → «Мост» или обратно)
+function Switch-Client([string]$name) {
+    if (-not $Clients.ContainsKey($name) -or $name -eq $script:Client) { return }
+    Log "переход: $($script:C.title) → $($Clients[$name].title)"
+    $cfg | Add-Member -NotePropertyName client -NotePropertyValue $name -Force
+    $cfg | Add-Member -NotePropertyName rd_id -NotePropertyValue '' -Force
+    $cfg | Add-Member -NotePropertyName rd_pass -NotePropertyValue '' -Force
+    Save-Cfg
+    Use-Client $name
+    $script:ForceRd = $true
 }
 
 # ------------------------------------------------------------------ задания
@@ -316,6 +364,7 @@ while ($true) {
         if ($script:NeedPrograms) { $rep.programs = Get-Programs }
         $resp = Api '/a/report' $rep
         $script:NeedPrograms = [bool]$resp.need_programs
+        if ($resp.client) { Switch-Client ([string]$resp.client) }
         if ($resp.interval) { $interval = [int]$resp.interval }
         foreach ($t in @($resp.tasks)) { if ($t) { Log "задание $($t.id): $($t.title)"; try { Start-Task $t } catch { Send-Result $t.id $false "Ошибка: $($_.Exception.Message)" 1 } } }
         Check-Running
