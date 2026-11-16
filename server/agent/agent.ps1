@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.4'
+$AgentVersion = '1.5'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -144,6 +144,17 @@ function Set-Toml([string]$file, [string]$section, [hashtable]$values) {
     [IO.File]::WriteAllLines($file, $lines, (New-Object Text.UTF8Encoding $false))
 }
 
+# правка настроек RustDesk: только при остановленном RustDesk, иначе при выходе он перезапишет файл своими старыми настройками
+function Edit-RdConfig([scriptblock]$edit) {
+    Stop-Service RustDesk -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    Get-Process rustdesk -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    & $edit
+    Start-Service RustDesk -ErrorAction SilentlyContinue
+    Start-Sleep 8
+}
+
 function Get-TomlValue([string]$file, [string]$key) {
     if (-not (Test-Path $file)) { return '' }
     $m = Select-String -Path $file -Pattern "^\s*$([regex]::Escape($key))\s*=\s*'([^']*)'" | Select-Object -First 1
@@ -176,8 +187,7 @@ function Ensure-RustDesk([bool]$newPass = $false) {
         if ((Get-TomlValue $cfg2 'custom-rendezvous-server') -ne '__RD_HOST__') {
             # команда не сработала — пишем настройки службы напрямую
             Log "RustDesk --option не сработал ($r) — пишу настройки в файл"
-            Set-Toml $cfg2 'options' @{ 'custom-rendezvous-server' = '__RD_HOST__'; 'relay-server' = '__RD_HOST__'; 'key' = '__RD_KEY__' }
-            $restart = $true
+            Edit-RdConfig { Set-Toml $cfg2 'options' @{ 'custom-rendezvous-server' = '__RD_HOST__'; 'relay-server' = '__RD_HOST__'; 'key' = '__RD_KEY__' } }
         }
         Log 'RustDesk направлен на сервер офиса'
     }
@@ -190,8 +200,7 @@ function Ensure-RustDesk([bool]$newPass = $false) {
         if ($res -notmatch 'Done') {
             # запасной путь: пароль открытым текстом в настройки службы, RustDesk сам зашифрует при запуске
             Log "RustDesk --password: '$res' — пишу пароль в файл"
-            Set-Toml $cfg1 '' @{ 'password' = $p }
-            $restart = $true
+            Edit-RdConfig { Set-Toml $cfg1 '' @{ 'password' = $p } }
         }
         $cfg | Add-Member -NotePropertyName rd_pass -NotePropertyValue $p -Force
         Save-Cfg; $changed = $true; Log 'пароль RustDesk задан'
