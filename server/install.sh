@@ -96,7 +96,8 @@ ap = os.environ.get("APATH", "").strip().strip("/")
 if ap:   # секретный адрес админки: https://сервер:порт/<ap>/
     import re
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", ap):
-        raise SystemExit("Секретный адрес: 8–64 символа, только латиница, цифры, - и _")
+        bad = sorted({("пробел" if ch == " " else "U+%04X" % ord(ch)) for ch in ap if not re.fullmatch(r"[A-Za-z0-9_-]", ch)})
+        raise SystemExit(f"Секретный адрес: 8–64 символа, только латиница, цифры, - и _ (сейчас длина {len(ap)}, лишние символы: {', '.join(bad) or 'нет'})")
     c["admin_path"] = ap
 if os.environ.get("NEWPASS"):
     salt = secrets.token_hex(16)
