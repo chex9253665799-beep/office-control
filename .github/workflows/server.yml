@@ -61,7 +61,7 @@ jobs:
               [ -n "$PANEL_PASS" ] || { echo "Нет секрета PANEL_PASS (пароль панели)"; exit 1; }
               # пароль панели передаём через stdin, чтобы его не было в командной строке на сервере
               printf '%s\n%s\n' "$PANEL_PASS" "$PANEL_PATH" | $SSH "$USR@$HOST" \
-                "read -r P; read -r A; curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/server/install.sh -o /tmp/office-install.sh && $SUDO env OFFICE_PASS=\"\$P\" OFFICE_ADMIN_PATH=\"\$A\" OFFICE_HOST='$HOST' bash /tmp/office-install.sh; rc=\$?; rm -f /tmp/office-install.sh; exit \$rc"
+                "read -r P; read -r A; curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/server/install.sh -o /tmp/office-install.sh && $SUDO env OFFICE_PASS=\"\$P\" OFFICE_ADMIN_PATH=\"\$A\" OFFICE_HOST='$HOST' bash /tmp/office-install.sh; rc=\$?; rm -f /tmp/office-install.sh; exit \$rc"
               ;;
             status)
               $SSH "$USR@$HOST" "uname -a; . /etc/os-release && echo \"\$PRETTY_NAME\"; uptime; free -m; df -h / | tail -1;
