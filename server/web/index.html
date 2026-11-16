@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Офис — панель управления</title>
+<style>
+:root{--bg:#0d1117;--panel:#151b26;--panel2:#1c2433;--line:#273043;--text:#e6ebf4;--mute:#8b96ab;--acc:#3b82f6;--acc2:#2563eb;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
+button,select,input,textarea{font:inherit;color:inherit}
+button{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+button:hover{border-color:#3a4760}
+button.pri{background:var(--acc);border-color:var(--acc)}button.pri:hover{background:var(--acc2)}
+button.danger{border-color:#7f1d1d;color:#fca5a5}
+button.sm{padding:4px 9px;font-size:13px}
+input,select,textarea{background:#0f1520;border:1px solid var(--line);border-radius:8px;padding:7px 10px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--acc)}
+textarea{width:100%;min-height:110px;font-family:Consolas,monospace;font-size:13px}
+header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;font-weight:600}
+.count{color:var(--mute)}
+.sp{flex:1}
+main{padding:16px 20px;max-width:1500px;margin:0 auto}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.act{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:14px;display:none}
+.act.show{display:block}
+.act .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px}
+table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{color:var(--mute);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.03em;background:var(--panel2)}
+tr:last-child td{border-bottom:none}
+tr.off td{opacity:.55}
+tr:hover td{background:#182030}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px;background:#475569}
+.dot.on{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+.name{font-weight:600;cursor:pointer}.name:hover{color:#93c5fd}
+.sub{color:var(--mute);font-size:12px}
+.meter{width:90px;height:6px;background:#0f1520;border-radius:4px;overflow:hidden;margin-top:3px}
+.meter i{display:block;height:100%;background:var(--acc)}
+.meter i.w{background:var(--warn)}.meter i.b{background:var(--bad)}
+.tag{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:12px;color:var(--mute)}
+.btns{display:flex;gap:6px;flex-wrap:wrap}
+a.btn{display:inline-block;text-decoration:none;color:var(--text);background:var(--acc);border-radius:8px;padding:4px 10px;font-size:13px}
+a.btn.g{background:var(--panel2);border:1px solid var(--line)}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(720px,100%);background:var(--panel);border-left:1px solid var(--line);z-index:10;transform:translateX(100%);transition:transform .2s;display:flex;flex-direction:column}
+.drawer.show{transform:none}
+.drawer .hd{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.drawer .bd{padding:14px 18px;overflow:auto;flex:1}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;margin-bottom:14px}
+.kv div:nth-child(odd){color:var(--mute)}
+h3{font-size:14px;margin:18px 0 8px;color:#c7d2fe}
+pre{background:#0b0f16;border:1px solid var(--line);border-radius:8px;padding:9px;white-space:pre-wrap;word-break:break-word;font-size:12.5px;max-height:320px;overflow:auto;margin:6px 0 0}
+.task{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:var(--panel2)}
+.st{font-size:12px;border-radius:6px;padding:1px 7px}
+.st.pending,.st.sent{background:#3b2f0a;color:#fcd34d}.st.done{background:#0b3b22;color:#86efac}.st.error{background:#3f1010;color:#fca5a5}
+.login{max-width:360px;margin:12vh auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px}
+.login h1{font-size:19px;margin:0 0 16px}
+.login input{width:100%;margin-bottom:12px}
+.err{color:#fca5a5;min-height:20px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;display:none;align-items:center;justify-content:center;padding:16px}
+.modal.show{display:flex}
+.modal .box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;max-width:760px;width:100%;max-height:90vh;overflow:auto}
+.copy{display:flex;gap:8px;align-items:flex-start}.copy pre{flex:1;margin:0}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#111827;border:1px solid var(--line);border-radius:10px;padding:10px 16px;z-index:30;display:none}
+.empty{text-align:center;color:var(--mute);padding:40px}
+@media (max-width:900px){.hide-m{display:none}}
+</style>
+</head>
+<body>
+<div id="login" class="login" style="display:none">
+  <h1>🖥 Панель офиса</h1>
+  <input id="pw" type="password" placeholder="Пароль администратора" autofocus>
+  <div class="err" id="lerr"></div>
+  <button class="pri" style="width:100%" onclick="login()">Войти</button>
+</div>
+
+<div id="app" style="display:none">
+<header>
+  <h1>🖥 Панель офиса</h1><span class="count" id="count"></span>
+  <span class="sp"></span>
+  <button onclick="showAdd()">＋ Добавить ПК</button>
+  <button onclick="showMy()">Подключаться с моего ПК</button>
+  <button onclick="showLog()">Журнал</button>
+  <button onclick="logout()">Выйти</button>
+</header>
+<main>
+  <div class="bar">
+    <input id="q" placeholder="Поиск: имя, пользователь, IP, программа…" oninput="render()" style="min-width:280px">
+    <select id="grpf" onchange="render()"><option value="">Все группы</option></select>
+    <label><input type="checkbox" id="onlyon" onchange="render()"> только в сети</label>
+    <span class="sp"></span>
+    <span class="sub" id="selinfo"></span>
+  </div>
+
+  <div class="act" id="act">
+    <b>Действие для выбранных ПК</b>
+    <div class="row">
+      <select id="scr" onchange="argsUI()" style="min-width:340px"></select>
+      <span id="args" class="row" style="margin:0"></span>
+      <button class="pri" onclick="runScript()">Выполнить</button>
+    </div>
+    <details style="margin-top:10px"><summary class="sub">Своя команда PowerShell</summary>
+      <textarea id="ps" placeholder="Например: Get-Service | Where Status -eq Running"></textarea>
+      <div class="row"><label><input type="checkbox" id="asuser"> выполнить в сеансе пользователя (а не от системы)</label><span class="sp"></span><button class="pri" onclick="runPs()">Выполнить команду</button></div>
+    </details>
+    <details style="margin-top:8px"><summary class="sub">Отправить файл на ПК</summary>
+      <div class="row">
+        <input type="file" id="file">
+        <input id="dest" value="C:\Users\Public\Desktop" style="min-width:260px" title="Куда положить">
+        <label><input type="checkbox" id="frun"> запустить после копирования</label>
+        <input id="fargs" placeholder="ключи запуска, напр. /S" style="width:150px">
+        <button class="pri" onclick="sendFile()">Отправить</button>
+      </div>
+      <div class="sub">Папка «C:\Users\Public\Desktop» — рабочий стол всех пользователей.</div>
+    </details>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th style="width:28px"><input type="checkbox" id="all" onchange="selAll(this.checked)"></th>
+      <th>Компьютер</th><th class="hide-m">Пользователь</th><th class="hide-m">Система</th>
+      <th>Процессор</th><th>Память</th><th>Диск C</th><th class="hide-m">IP</th><th>Подключение</th>
+    </tr></thead>
+    <tbody id="list"></tbody>
+  </table>
+  <div class="empty" id="empty" style="display:none">Компьютеров пока нет. Нажми «＋ Добавить ПК».</div>
+</main>
+</div>
+
+<div class="drawer" id="drawer">
+  <div class="hd"><b id="dtitle" style="font-size:16px"></b><span class="sp"></span><button class="sm" onclick="closeDrawer()">✕</button></div>
+  <div class="bd" id="dbody"></div>
+</div>
+
+<div class="modal" id="modal" onclick="if(event.target===this)closeModal()"><div class="box" id="mbox"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+let INFO=null, PCS=[], SEL=new Set(), OPEN=null, timer=null;
+const $=id=>document.getElementById(id);
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';clearTimeout(e._t);e._t=setTimeout(()=>e.style.display='none',3500)}
+async function api(path,opt={}){
+  const r=await fetch(path,Object.assign({credentials:'same-origin',headers:{'Content-Type':'application/json'}},opt));
+  if(r.status===401){showLogin();throw new Error('нужно войти')}
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.error||('ошибка '+r.status));
+  return j;
+}
+function ago(ts){if(!ts)return '—';const s=Math.floor(Date.now()/1000-ts);if(s<60)return 'только что';if(s<3600)return Math.floor(s/60)+' мин назад';if(s<86400)return Math.floor(s/3600)+' ч назад';return Math.floor(s/86400)+' дн назад'}
+function dt(ts){return ts?new Date(ts*1000).toLocaleString('ru-RU'):'—'}
+function meter(p){p=Math.max(0,Math.min(100,p||0));return `<div class="meter"><i class="${p>90?'b':p>75?'w':''}" style="width:${p}%"></i></div>`}
+
+function showLogin(){$('app').style.display='none';$('login').style.display='block';$('pw').focus();clearInterval(timer)}
+async function login(){
+  try{await api('/api/login',{method:'POST',body:JSON.stringify({password:$('pw').value})});$('pw').value='';start()}
+  catch(e){$('lerr').textContent=e.message}
+}
+$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
+async function logout(){await api('/api/logout',{method:'POST'}).catch(()=>{});showLogin()}
+
+async function start(){
+  INFO=await api('/api/info');
+  $('login').style.display='none';$('app').style.display='block';
+  const groups={};INFO.scripts.forEach(s=>(groups[s.group]=groups[s.group]||[]).push(s));
+  $('scr').innerHTML=Object.entries(groups).map(([g,l])=>`<optgroup label="${esc(g)}">`+l.map(s=>`<option value="${s.id}">${esc(s.title)}${s.danger?' ⚠':''}</option>`).join('')+'</optgroup>').join('');
+  argsUI();await load();clearInterval(timer);timer=setInterval(()=>{load();if(OPEN)openPc(OPEN,true)},10000);
+}
+async function load(){PCS=await api('/api/pcs');render()}
+
+function render(){
+  const q=$('q').value.trim().toLowerCase(), g=$('grpf').value, on=$('onlyon').checked;
+  const groups=[...new Set(PCS.map(p=>p.grp).filter(Boolean))].sort();
+  const cur=$('grpf').value;$('grpf').innerHTML='<option value="">Все группы</option>'+groups.map(x=>`<option${x===cur?' selected':''}>${esc(x)}</option>`).join('');
+  const n=PCS.filter(p=>p.online).length;$('count').textContent=`в сети ${n} из ${PCS.length}`;
+  const rows=PCS.filter(p=>{
+    if(g&&p.grp!==g)return false;if(on&&!p.online)return false;
+    if(!q)return true;const i=p.info||{};
+    return [p.alias,p.hostname,i.user,p.ip,(i.ips||[]).join(' '),p.grp,p.notes,i.os,p.rd_id].join(' ').toLowerCase().includes(q);
+  });
+  $('empty').style.display=PCS.length?'none':'block';
+  $('list').innerHTML=rows.map(p=>{
+    const i=p.info||{}, c=(i.disks||[]).find(d=>d.name==='C:')||(i.disks||[])[0];
+    const ram=i.ram_gb?Math.round(100*(i.ram_gb-i.ram_free_gb)/i.ram_gb):0;
+    const disk=c&&c.size_gb?Math.round(100*(c.size_gb-c.free_gb)/c.size_gb):0;
+    const pass=p.rd_pass?`?password=${encodeURIComponent(p.rd_pass)}`:'';
+    const conn=p.rd_id?`<div class="btns"><a class="btn" href="rustdesk://connection/new/${esc(p.rd_id)}${pass}" title="Открыть экран этого ПК">Экран</a><a class="btn g" href="rustdesk://file-transfer/${esc(p.rd_id)}${pass}">Файлы</a></div><div class="sub">ID ${esc(p.rd_id)}</div>`:'<span class="sub">RustDesk ставится…</span>';
+    return `<tr class="${p.online?'':'off'}">
+      <td><input type="checkbox" ${SEL.has(p.id)?'checked':''} onchange="sel('${p.id}',this.checked)"></td>
+      <td><span class="dot ${p.online?'on':''}"></span><span class="name" onclick="openPc('${p.id}')">${esc(p.alias||p.hostname)}</span>
+        ${p.grp?` <span class="tag">${esc(p.grp)}</span>`:''}${p.pending?` <span class="tag">⏳ ${p.pending}</span>`:''}
+        <div class="sub">${p.alias?esc(p.hostname)+' · ':''}${p.online?'в сети':'был '+ago(p.last_seen)}</div></td>
+      <td class="hide-m">${esc((i.user||'—').split('\\').pop())}</td>
+      <td class="hide-m"><div>${esc((i.os||'—').replace('Microsoft ',''))}</div><div class="sub">работает ${i.uptime_h??'—'} ч</div></td>
+      <td>${i.cpu_load??'—'}%${meter(i.cpu_load)}</td>
+      <td>${i.ram_gb?`${(i.ram_gb-i.ram_free_gb).toFixed(1)} из ${i.ram_gb} ГБ`:'—'}${meter(ram)}</td>
+      <td>${c?`свободно ${c.free_gb} ГБ`:'—'}${meter(disk)}</td>
+      <td class="hide-m">${esc((i.ips||[]).join(', ')||p.ip)}</td>
+      <td>${conn}</td></tr>`;
+  }).join('');
+  $('act').classList.toggle('show',SEL.size>0);
+  $('selinfo').textContent=SEL.size?`выбрано: ${SEL.size}`:'';
+}
+function sel(id,on){on?SEL.add(id):SEL.delete(id);render()}
+function selAll(on){SEL=new Set(on?PCS.filter(p=>!$('onlyon').checked||p.online).map(p=>p.id):[]);render()}
+
+function argsUI(){
+  const s=INFO.scripts.find(x=>x.id===$('scr').value);
+  $('args').innerHTML=(s.args||[]).map(a=>`<input data-a="${a.name}" placeholder="${esc(a.label)}" value="${esc(a.default||'')}" style="min-width:220px" title="${esc(a.label)}">`).join('');
+}
+async function runScript(){
+  const s=INFO.scripts.find(x=>x.id===$('scr').value), args={};
+  document.querySelectorAll('#args input').forEach(i=>args[i.dataset.a]=i.value);
+  if(s.danger&&!confirm(`«${s.title}» на ${SEL.size} ПК — точно?`))return;
+  try{const r=await api('/api/run',{method:'POST',body:JSON.stringify({pcs:[...SEL],script:s.id,args})});toast(`Отправлено на ${r.count} ПК — выполнится в течение ~20 секунд`);load()}catch(e){toast('⚠ '+e.message)}
+}
+async function runPs(){
+  const ps=$('ps').value.trim();if(!ps)return;
+  if(!confirm(`Выполнить свою команду на ${SEL.size} ПК?`))return;
+  try{const r=await api('/api/run',{method:'POST',body:JSON.stringify({pcs:[...SEL],ps,as_user:$('asuser').checked})});toast(`Отправлено на ${r.count} ПК`);load()}catch(e){toast('⚠ '+e.message)}
+}
+async function sendFile(){
+  const f=$('file').files[0];if(!f)return toast('Выбери файл');
+  toast('Загружаю файл на сервер…');
+  try{
+    const r=await fetch('/api/upload',{method:'POST',credentials:'same-origin',headers:{'X-Name':encodeURIComponent(f.name)},body:f});
+    const j=await r.json();if(!r.ok)throw new Error(j.error);
+    const x=await api('/api/run',{method:'POST',body:JSON.stringify({pcs:[...SEL],file:j.id,dest:$('dest').value,run:$('frun').checked,run_args:$('fargs').value})});
+    toast(`Файл отправлен на ${x.count} ПК`);load();
+  }catch(e){toast('⚠ '+e.message)}
+}
+
+async function openPc(id,quiet){
+  OPEN=id;let p;try{p=await api('/api/pc/'+id)}catch(e){return}
+  const i=p.info||{};$('dtitle').textContent=(p.alias||p.hostname)+(p.online?' 🟢':' ⚪');
+  const pass=p.rd_pass?`?password=${encodeURIComponent(p.rd_pass)}`:'';
+  const scrollTop=$('dbody').scrollTop, progQ=$('progq')?$('progq').value:'';
+  $('dbody').innerHTML=`
+    <div class="btns" style="margin-bottom:12px">
+      ${p.rd_id?`<a class="btn" href="rustdesk://connection/new/${esc(p.rd_id)}${pass}">Открыть экран</a><a class="btn g" href="rustdesk://file-transfer/${esc(p.rd_id)}${pass}">Файлы</a>`:''}
+      <button class="sm" onclick="SEL=new Set(['${p.id}']);render();closeDrawer();window.scrollTo(0,0)">Действия…</button>
+    </div>
+    <div class="kv">
+      <div>Название</div><div><input id="ealias" value="${esc(p.alias)}" placeholder="${esc(p.hostname)}" style="width:100%"></div>
+      <div>Группа</div><div><input id="egrp" value="${esc(p.grp)}" placeholder="Бухгалтерия, Склад…" style="width:100%"></div>
+      <div>Заметки</div><div><textarea id="enotes" style="min-height:60px;font-family:inherit">${esc(p.notes)}</textarea></div>
+      <div></div><div><button class="sm pri" onclick="savePc('${p.id}')">Сохранить</button></div>
+    </div>
+    <div class="kv">
+      <div>Статус</div><div>${p.online?'в сети':'не в сети, был '+ago(p.last_seen)}</div>
+      <div>Имя ПК</div><div>${esc(p.hostname)}</div>
+      <div>Пользователь</div><div>${esc(i.user||'никто не вошёл')}</div>
+      <div>Система</div><div>${esc(i.os)} (сборка ${esc(i.build)})</div>
+      <div>Работает без перезагрузки</div><div>${i.uptime_h??'—'} ч</div>
+      <div>Компьютер</div><div>${esc(i.vendor)}${i.serial?' · S/N '+esc(i.serial):''}</div>
+      <div>Процессор</div><div>${esc(i.cpu)} · ${i.cores} потоков · загрузка ${i.cpu_load??'—'}%</div>
+      <div>Память</div><div>${i.ram_gb} ГБ, свободно ${i.ram_free_gb} ГБ</div>
+      <div>Диски</div><div>${(i.disks||[]).map(d=>`${esc(d.name)} свободно ${d.free_gb} из ${d.size_gb} ГБ`).join('<br>')}</div>
+      <div>Сеть</div><div>${esc((i.ips||[]).join(', '))} · внешний ${esc(p.ip)} · MAC ${esc(i.mac||'—')}</div>
+      <div>Антивирус</div><div>${esc((i.antivirus||[]).join(', ')||'—')}</div>
+      <div>RustDesk</div><div>${p.rd_id?`ID <b>${esc(p.rd_id)}</b> · пароль <code>${esc(p.rd_pass||'—')}</code>`:'ещё не настроен'}</div>
+      <div>Агент</div><div>${esc(i.agent||'—')} · в панели с ${dt(p.first_seen)}</div>
+    </div>
+    <h3>Задания</h3>
+    ${(p.tasks||[]).map(t=>`<div class="task"><span class="st ${t.status}">${{pending:'ждёт',sent:'выполняется',done:'готово',error:'ошибка'}[t.status]}</span> <b>${esc(t.title)}</b> <span class="sub">${dt(t.created)}</span>
+      ${t.status==='pending'?` <button class="sm" onclick="cancelTask(${t.id})">отменить</button>`:''}
+      ${t.output?`<pre>${esc(t.output)}</pre>`:''}</div>`).join('')||'<div class="sub">Пока не было</div>'}
+    <h3>Программы (${(p.programs||[]).length})</h3>
+    <input id="progq" placeholder="Поиск программы" oninput="filterProg()" value="${esc(progQ)}" style="width:100%;margin-bottom:8px">
+    <div id="progs">${(p.programs||[]).map(x=>`<div class="prog" style="padding:4px 0;border-bottom:1px solid var(--line)">${esc(x.n)} <span class="sub">${esc(x.v||'')} · ${esc(x.p||'')}</span></div>`).join('')}</div>
+    <h3>Опасная зона</h3>
+    <button class="danger sm" onclick="delPc('${p.id}')">Убрать ПК из панели</button>
+    <div class="sub">Сам агент на ПК при этом не удаляется — для удаления выполни на ПК: Unregister-ScheduledTask OfficeAgent.</div>`;
+  if(!quiet)$('drawer').classList.add('show');else $('dbody').scrollTop=scrollTop;
+  filterProg();
+}
+function filterProg(){const q=($('progq')||{}).value?.toLowerCase()||'';document.querySelectorAll('#progs .prog').forEach(d=>d.style.display=d.textContent.toLowerCase().includes(q)?'':'none')}
+function closeDrawer(){$('drawer').classList.remove('show');OPEN=null}
+async function savePc(id){try{await api('/api/pc/'+id,{method:'POST',body:JSON.stringify({alias:$('ealias').value,grp:$('egrp').value,notes:$('enotes').value})});toast('Сохранено');load()}catch(e){toast('⚠ '+e.message)}}
+async function delPc(id){if(!confirm('Убрать этот ПК из панели?'))return;await api('/api/pc/'+id,{method:'DELETE'});closeDrawer();load()}
+async function cancelTask(id){await api('/api/task/'+id,{method:'DELETE'});openPc(OPEN,true)}
+
+function modal(html){$('mbox').innerHTML=html+'<div style="text-align:right;margin-top:14px"><button onclick="closeModal()">Закрыть</button></div>';$('modal').classList.add('show')}
+function closeModal(){$('modal').classList.remove('show')}
+function copyBtn(id){return `<button class="sm" onclick="navigator.clipboard.writeText(document.getElementById('${id}').innerText).then(()=>toast('Скопировано'))">Копировать</button>`}
+function showAdd(){
+  modal(`<h3 style="margin-top:0">＋ Добавить компьютер</h3>
+  <ol>
+   <li>На нужном ПК нажми <b>Пуск</b>, напиши <b>PowerShell</b> → правой кнопкой → <b>Запуск от имени администратора</b> (именно PowerShell, не «командная строка»).</li>
+   <li>Вставь эту строку и нажми Enter:</li></ol>
+  <div class="copy"><pre id="cmd">${esc(INFO.install)}</pre>${copyBtn('cmd')}</div>
+  <p class="sub">Через минуту ПК появится в списке, ещё через пару минут — кнопка «Экран» (агент сам поставит RustDesk на твой сервер с постоянным паролем).<br>
+  Строка содержит ключ подключения к твоей панели — не публикуй её.</p>`);
+}
+function showMy(){
+  modal(`<h3 style="margin-top:0">Подключаться с моего ПК или телефона</h3>
+  <p>Кнопки «Экран» и «Файлы» открывают программу <b>RustDesk</b> на твоём компьютере. Её нужно один раз поставить и направить на твой сервер:</p>
+  <ol>
+   <li>Скачай RustDesk: <a href="https://rustdesk.com/download" target="_blank" style="color:#93c5fd">rustdesk.com/download</a> (или с панели: <a href="/dl/rustdesk.exe" style="color:#93c5fd">rustdesk.exe</a>) и установи.</li>
+   <li>В RustDesk: ⋮ рядом с ID → <b>Сеть</b> → <b>Сервер ID/ретрансляции</b>, заполни:</li></ol>
+  <div class="kv"><div>ID-сервер</div><div class="copy"><pre id="h1">${esc(INFO.rd_host)}</pre>${copyBtn('h1')}</div>
+  <div>Сервер ретрансляции</div><div class="copy"><pre id="h2">${esc(INFO.rd_host)}</pre>${copyBtn('h2')}</div>
+  <div>Ключ</div><div class="copy"><pre id="h3">${esc(INFO.rd_key||'ключ появится после первого запуска сервера RustDesk')}</pre>${copyBtn('h3')}</div></div>
+  <p class="sub">На телефоне (RustDesk для Android) — то же самое: Настройки → Сервер ID/ретрансляции. После этого «Экран» в панели открывает нужный ПК сразу, без ввода пароля.</p>`);
+}
+async function showLog(){
+  const l=await api('/api/log');
+  modal(`<h3 style="margin-top:0">Журнал</h3>`+l.map(r=>`<div style="padding:5px 0;border-bottom:1px solid var(--line)"><span class="sub">${dt(r.ts)} · ${esc(r.who)}</span><br>${esc(r.text)}</div>`).join(''));
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeDrawer()}});
+api('/api/info').then(start).catch(()=>showLogin());
+</script>
+</body>
+</html>
