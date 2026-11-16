@@ -2,7 +2,7 @@
 # Каждые 20 секунд: отчёт в панель (состояние ПК) и получение заданий. Задания выполняются в фоне.
 # Связь только с панелью по HTTPS, сертификат панели сверяется по отпечатку.
 
-$AgentVersion = '1.10'
+$AgentVersion = '1.11'
 $Dir = "$env:ProgramData\OfficeAgent"
 $ErrorActionPreference = 'Continue'
 
@@ -112,9 +112,10 @@ function Use-Client([string]$name) {
 }
 Use-Client $(if ($cfg.client) { $cfg.client } else { 'rustdesk' })
 
+# ВНИМАНИЕ: не называть функцию Rd — в PowerShell это встроенное имя Remove-Item.
 # команда программы с ограничением по времени (иначе может зависнуть навсегда).
 # Как в официальном скрипте RustDesk: из папки программы, вывод через конвейер.
-function Rd([string[]]$a, [int]$sec = 30, [string]$exe = $script:RdExe) {
+function Invoke-RdCli([string[]]$a, [int]$sec = 30, [string]$exe = $script:RdExe) {
     $j = Start-Job -ScriptBlock {
         param($exe, $args2)
         Set-Location (Split-Path $exe)
@@ -178,7 +179,7 @@ function Get-TomlValue([string]$file, [string]$key) {
 # Новый постоянный пароль. Возвращает пароль.
 function Set-RdPassword {
     $p = New-Pass
-    $res = Rd '--password', $p
+    $res = Invoke-RdCli '--password', $p
     if ($res -notmatch 'Done') {
         Log "$($script:C.title) --password: '$res' — пишу пароль в файл"
         Edit-RdConfig { Set-Toml "$script:RdCfgDir\$($script:C.cfgName).toml" '' @{ 'password' = $p } }
@@ -232,7 +233,7 @@ function Remove-OldRustDesk {
     if (-not $left -and -not $svc) { return }
     Log 'удаляю RustDesk полностью (заменён «Мостом»)'
     # 1) штатное удаление
-    if (Test-Path $old) { Rd '--uninstall' 120 $old | Out-Null; Start-Sleep 5 }
+    if (Test-Path $old) { Invoke-RdCli '--uninstall' 120 $old | Out-Null; Start-Sleep 5 }
     # 2) служба и процессы
     Stop-Service RustDesk -Force -ErrorAction SilentlyContinue
     & sc.exe delete RustDesk 2>&1 | Out-Null
@@ -262,9 +263,9 @@ function Ensure-RustDesk([bool]$newPass = $false) {
 
     # 1) сервер офиса (у «Моста» он вшит при сборке)
     if (-not $script:C.builtin -and ((Get-TomlValue $cfg2 'custom-rendezvous-server') -ne '__RD_HOST__' -or (Get-TomlValue $cfg2 'key') -ne '__RD_KEY__')) {
-        $r = Rd '--option', 'custom-rendezvous-server', '__RD_HOST__'
-        Rd '--option', 'relay-server', '__RD_HOST__' | Out-Null
-        Rd '--option', 'key', '__RD_KEY__' | Out-Null
+        $r = Invoke-RdCli '--option', 'custom-rendezvous-server', '__RD_HOST__'
+        Invoke-RdCli '--option', 'relay-server', '__RD_HOST__' | Out-Null
+        Invoke-RdCli '--option', 'key', '__RD_KEY__' | Out-Null
         Start-Sleep 2
         if ((Get-TomlValue $cfg2 'custom-rendezvous-server') -ne '__RD_HOST__') {
             Log "RustDesk --option не сработал ($r) — пишу настройки в файл"
@@ -279,7 +280,7 @@ function Ensure-RustDesk([bool]$newPass = $false) {
     if ((Get-Service $script:C.svc -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service $script:C.svc -ErrorAction SilentlyContinue; Start-Sleep 5 }
 
     # 3) ID
-    $rawId = Rd '--get-id'
+    $rawId = Invoke-RdCli '--get-id'
     $id = $rawId -replace '\s', ''
     if ($id -notmatch '^\d{6,}$') {
         Log "$($script:C.title) --get-id ответил: '$rawId'"
