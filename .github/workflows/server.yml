@@ -17,7 +17,7 @@ on:
         description: "Что сделать"
         type: choice
         default: status
-        options: [install, status, logs, restart, pcs, reset2fa, rddiag, lastdiag, load]
+        options: [install, status, logs, restart, pcs, reset2fa, rddiag, lastdiag, load, rdkey]
       target:
         description: "Имя ПК (для rddiag)"
         type: string
@@ -121,6 +121,10 @@ jobs:
                 set -- \$a \$b; echo \"входящий: \$(( (\$3-\$1)*8/10/1000 )) Кбит/с, исходящий: \$(( (\$4-\$2)*8/10/1000 )) Кбит/с (\$IF)\";
                 echo '--- соединения через ретранслятор RustDesk (21117)'; ss -tn state established '( sport = :21117 )' | tail -n +2 | wc -l;
                 echo '--- соединения к серверу ID (21116)'; ss -tn state established '( sport = :21116 )' | tail -n +2 | wc -l"
+              ;;
+            rdkey)
+              # открытый ключ сервера RustDesk (не секрет: его получает каждый, кто подключается)
+              $SSH "$USR@$HOST" "cat /opt/office/rustdesk/id_ed25519.pub; echo; wc -c < /opt/office/rustdesk/id_ed25519.pub"
               ;;
             lastdiag)
               $SSH "$USR@$HOST" "$SUDO python3 -" < server/tools/task_out.py
