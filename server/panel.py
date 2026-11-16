@@ -334,8 +334,9 @@ class H(BaseHTTPRequestHandler):
         if d.get("programs") is not None:
             sets += ["programs=?", "programs_at=?"]
             vals += [json.dumps(d["programs"], ensure_ascii=False), now]
-        if d.get("rd_id"):
-            sets.append("rd_id=?"); vals.append(str(d["rd_id"])[:20])
+        rd_id = str(d.get("rd_id") or "")[:20] or (pc["rd_id"] if pc["rd_id"] else rd_id_from_hbbs(pc["guid"]))
+        if rd_id and rd_id != pc["rd_id"]:
+            sets.append("rd_id=?"); vals.append(rd_id)
         if d.get("rd_pass"):
             sets.append("rd_pass=?"); vals.append(str(d["rd_pass"])[:40])
         with LOCK, db() as c:
@@ -541,6 +542,21 @@ def task_file_id(t):
         return json.loads(t["payload"]).get("id") if t and t["kind"] == "file" else None
     except (ValueError, TypeError):
         return None
+
+
+def rd_id_from_hbbs(guid):
+    """ID RustDesk этого ПК — из базы нашего сервера RustDesk (hbbs): RustDesk регистрируется под MachineGuid Windows."""
+    if not guid:
+        return ""
+    try:
+        h = sqlite3.connect(f"file:{os.path.join(HOME, 'rustdesk', 'db_v2.sqlite3')}?mode=ro", uri=True, timeout=5)
+        try:
+            r = h.execute("SELECT id FROM peer WHERE uuid=? OR uuid=? ORDER BY created_at DESC LIMIT 1", (guid.encode(), guid)).fetchone()
+        finally:
+            h.close()
+        return str(r[0]) if r and re.fullmatch(r"\d{6,12}", str(r[0])) else ""
+    except sqlite3.Error:
+        return ""
 
 
 def read_rd_key():
