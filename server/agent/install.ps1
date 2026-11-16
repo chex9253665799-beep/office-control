@@ -23,8 +23,11 @@ if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
 Say 'Агент офиса: установка…' Cyan
 New-Item -ItemType Directory -Force -Path $Dir, "$Dir\tmp" | Out-Null
 # папка агента — только система и администраторы; tmp — ещё и пользователи (для команд в их сеансе)
-icacls $Dir /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
-icacls "$Dir\tmp" /grant 'Users:(OI)(CI)M' | Out-Null
+# группы по SID — имена зависят от языка Windows («Администраторы», «Пользователи»)
+$ErrorActionPreference = 'Continue'
+icacls $Dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' 2>&1 | Out-Null
+icacls "$Dir\tmp" /grant '*S-1-5-32-545:(OI)(CI)M' 2>&1 | Out-Null
+$ErrorActionPreference = 'Stop'
 
 $wc = New-Object Net.WebClient
 $wc.Encoding = [Text.Encoding]::UTF8
